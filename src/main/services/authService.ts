@@ -138,7 +138,7 @@ export function updateUser(
   if (data.pin)       { sets.push('pin = ?');         vals.push(hashPin(data.pin)) }
 
   vals.push(userId) // WHERE id = ?
-  db.prepare(`UPDATE users SET ${sets.join(', `)} WHERE id = ?`).run(vals)
+  db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(vals)
 
   return db.prepare(
     'SELECT id, full_name, username, role, is_active, created_at, updated_at FROM users WHERE id = ?'

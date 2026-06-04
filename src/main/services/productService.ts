@@ -74,14 +74,14 @@ export function updateProduct(db: DB, id: number, dto: UpdateProductDto): Produc
   const vals: unknown[] = []
 
   const fields: (keyof UpdateProductDto)[] = [
-    `name','sku','barcode','category_id','supplier_id','unit',
+    'name','sku','barcode','category_id','supplier_id','unit',
     'cost_price','selling_price','stock_qty','reorder_level','description',
   ]
   for (const k of fields) {
     if (k in dto) { sets.push(`${k} = ?`); vals.push((dto as Record<string, unknown>)[k]) }
   }
   vals.push(id)
-  db.prepare(`UPDATE products SET ${sets.join(', `)} WHERE id = ?`).run(vals)
+  db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(vals)
   return getProductById(db, id)!
 }
 
