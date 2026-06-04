@@ -52,7 +52,7 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
 
       db.prepare(`
         INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason)
-        VALUES (?, ?, ?, ?, ?, 'sale`)
+        VALUES (?, ?, ?, ?, ?, 'sale')
       `).run([item.product_id, input.served_by, qtyBefore, -item.quantity, qtyAfter])
     }
 
