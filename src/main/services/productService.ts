@@ -102,7 +102,7 @@ export interface BulkImportResult {
 export function bulkImportProducts(db: DB, rows: BulkImportRow[], userId: number): BulkImportResult {
   const result: BulkImportResult = { imported: 0, skipped: 0, errors: [] }
 
-  const getCategoryId = db.prepare(`SELECT id FROM categories WHERE name = ?')
+  const getCategoryId = db.prepare(`SELECT id FROM categories WHERE name = ?`)
   const insertProduct = db.prepare(`
     INSERT OR IGNORE INTO products (name, sku, barcode, category_id, unit, cost_price, selling_price, stock_qty, reorder_level)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

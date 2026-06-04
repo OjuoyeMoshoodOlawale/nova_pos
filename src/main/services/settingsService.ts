@@ -22,7 +22,7 @@ export function setSetting(db: DB, key: string, value: string): void {
   const stored = ENCRYPTED_KEYS.has(key) && value ? encrypt(value, getKey()) : value
   db.prepare(`
     INSERT INTO settings (key, value, updated_at)
-    VALUES (?, ?, datetime('now'))
+    VALUES (?, ?, datetime('now`))
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
   `).run([key, stored])
 }
@@ -57,7 +57,7 @@ export function saveBusinessProfile(db: DB, data: CreateBusinessProfileDto): Bus
       currency_code, currency_symbol,
       tax_name, tax_rate, tax_inclusive,
       receipt_header, receipt_footer, show_logo, updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now`))
     ON CONFLICT(id) DO UPDATE SET
       name            = excluded.name,
       type            = excluded.type,

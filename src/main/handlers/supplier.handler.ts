@@ -13,7 +13,7 @@ export function registerSupplierHandlers(db: DB): void {
   })
 
   safeHandle(CH.SUPPLIER_UPDATE, (_e, id: number, d: { name:string; contact?:string; phone?:string; email?:string; address?:string; notes?:string }) => {
-    db.prepare(`UPDATE suppliers SET name=?, contact=?, phone=?, email=?, address=?, notes=?, updated_at=datetime('now') WHERE id=?`)
+    db.prepare(`UPDATE suppliers SET name=?, contact=?, phone=?, email=?, address=?, notes=?, updated_at=datetime('now`) WHERE id=?`)
       .run([d.name, d.contact??null, d.phone??null, d.email??null, d.address??null, d.notes??null, id])
     return db.prepare('SELECT * FROM suppliers WHERE id=?').get([id])
   })
