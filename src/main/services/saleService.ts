@@ -47,7 +47,7 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run([id, item.product_id, item.product_name, item.unit_price, item.quantity, item.discount_pct, item.line_total, prod?.cost_price ?? 0])
 
-      db.prepare('UPDATE products SET stock_qty = ?, updated_at = datetime("now") WHERE id = ?')
+      db.prepare('UPDATE products SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?')
         .run([qtyAfter, item.product_id])
 
       db.prepare(`

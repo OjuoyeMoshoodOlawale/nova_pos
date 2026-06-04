@@ -12,29 +12,6 @@ import {
   Pause, Zap, Package,
 } from 'lucide-react'
 
-function useBarcodeScanner(onScan: (code: string) => void) {
-  const buffer = useRef('')
-  const lastTime = useRef(0)
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName
-      if ((tag === 'INPUT' || tag === 'TEXTAREA') && (e.target as HTMLElement).id !== 'pos-scan') return
-      const now = Date.now()
-      if (now - lastTime.current > 300) buffer.current = ''
-      lastTime.current = now
-      if (e.key === 'Enter' && buffer.current.length >= 3) {
-        onScan(buffer.current.trim())
-        buffer.current = ''
-        e.preventDefault()
-        return
-      }
-      if (e.key.length === 1) buffer.current += e.key
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [onScan])
-}
-
 function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product) => void }) {
   const { currencySymbol } = useCartStore()
   const out = product.stock_qty <= 0
@@ -143,8 +120,7 @@ export default function POSPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      <input id="pos-scan" className="sr-only" readOnly />
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+<div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
         <div className="p-3 bg-white border-b border-slate-200 space-y-2">
           <div className="relative">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400"/>

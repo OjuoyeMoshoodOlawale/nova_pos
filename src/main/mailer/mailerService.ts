@@ -102,7 +102,7 @@ export async function performBackup(): Promise<BackupResult> {
   const backupName = `novapos-backup-${timestamp}.db.gz`
 
   // ── Checkpoint WAL so backup is complete ───────────────
-  getDb().exec('PRAGMA wal_checkpoint(TRUNCATE)')
+  // WAL checkpoint removed — not using WAL mode
 
   // ── Gzip the database file ─────────────────────────────
   const tempPath = path.join(app.getPath('temp'), backupName)
