@@ -8,7 +8,7 @@ export function registerInventoryHandlers(db: DB): void {
   safeHandle(CH.INVENTORY_ADJUST, (_e, dto: {
     product_id: number; adjusted_by: number; qty_change: number; reason: string; notes?: string
   }) => {
-    const prod = db.prepare('SELECT stock_qty FROM products WHERE id=?`).get([dto.product_id]) as {stock_qty:number}
+    const prod = db.prepare('SELECT stock_qty FROM products WHERE id=?').get([dto.product_id]) as {stock_qty:number}
     const qtyBefore = prod.stock_qty
     const qtyAfter  = qtyBefore + dto.qty_change
 
