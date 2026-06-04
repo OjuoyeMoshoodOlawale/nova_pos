@@ -79,10 +79,9 @@ function startDev() {
 
   log('Starting electron-vite dev...\n')
 
-  const cmd  = os.platform() === 'win32' ? 'npx.cmd' : 'npx'
-  const proc = spawn(cmd, ['electron-vite', 'dev'], {
+  const proc = spawn('npx electron-vite dev', [], {
     stdio: 'inherit',
-    shell: false,
+    shell: true,   // required on Windows for .cmd files in PATH
   })
 
   proc.on('close', (code) => process.exit(code ?? 0))
