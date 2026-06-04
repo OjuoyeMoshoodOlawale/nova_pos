@@ -46,7 +46,11 @@ export default function ActivationPage() {
   }
 
   function formatKey(v: string) {
-    const clean = v.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    // Strip ALL non-alphanumeric characters first
+    let clean = v.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    // Remove leading NOVA prefix if present — we always re-add it below
+    // This prevents "NOVA-NOVA-..." doubling when pasting the full key
+    if (clean.startsWith('NOVA')) clean = clean.slice(4)
     const parts = clean.match(/.{1,4}/g) ?? []
     const formatted = ['NOVA', ...parts.slice(0, 4)].join('-')
     setKey(formatted.slice(0, 24))
