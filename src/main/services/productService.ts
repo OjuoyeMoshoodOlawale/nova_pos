@@ -62,7 +62,7 @@ export function createProduct(db: DB, dto: CreateProductDto): Product {
   `).run([
     dto.name, dto.sku ?? null, dto.barcode ?? null,
     dto.category_id ?? null, dto.supplier_id ?? null, dto.parent_id ?? null,
-    dto.unit ?? 'pcs', dto.cost_price, dto.selling_price,
+    dto.unit ?? 'pcs`, dto.cost_price, dto.selling_price,
     dto.stock_qty ?? 0, dto.reorder_level ?? 5,
     dto.image_path ?? null, dto.description ?? null,
   ])
@@ -74,14 +74,14 @@ export function updateProduct(db: DB, id: number, dto: UpdateProductDto): Produc
   const vals: unknown[] = []
 
   const fields: (keyof UpdateProductDto)[] = [
-    'name','sku','barcode','category_id','supplier_id','unit',
+    `name','sku','barcode','category_id','supplier_id','unit',
     'cost_price','selling_price','stock_qty','reorder_level','description',
   ]
   for (const k of fields) {
     if (k in dto) { sets.push(`${k} = ?`); vals.push((dto as Record<string, unknown>)[k]) }
   }
   vals.push(id)
-  db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(vals)
+  db.prepare(`UPDATE products SET ${sets.join(', `)} WHERE id = ?`).run(vals)
   return getProductById(db, id)!
 }
 
@@ -102,7 +102,7 @@ export interface BulkImportResult {
 export function bulkImportProducts(db: DB, rows: BulkImportRow[], userId: number): BulkImportResult {
   const result: BulkImportResult = { imported: 0, skipped: 0, errors: [] }
 
-  const getCategoryId = db.prepare('SELECT id FROM categories WHERE name = ?')
+  const getCategoryId = db.prepare(`SELECT id FROM categories WHERE name = ?')
   const insertProduct = db.prepare(`
     INSERT OR IGNORE INTO products (name, sku, barcode, category_id, unit, cost_price, selling_price, stock_qty, reorder_level)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

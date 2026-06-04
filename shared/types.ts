@@ -170,14 +170,16 @@ export type CreateCustomerDto = Omit<Customer, 'id' | 'balance' | 'is_active' | 
 
 // ─── CART & SALES ────────────────────────────────────────
 export interface CartItem {
-  product_id: number
+  product_id:   number
   product_name: string
-  barcode: string | null
-  unit_price: number
-  quantity: number
+  barcode:      string | null
+  unit_price:   number
+  quantity:     number
   discount_pct: number
-  line_total: number
-  cost_price: number  // snapshot for COGS calculation
+  line_total:   number
+  cost_price:   number    // snapshot for COGS calculation
+  sell_mode:    SellMode  // 'unit' or 'bulk'
+  unit_label:   string    // display label e.g. "pcs" or "carton"
 }
 
 export interface PaymentEntry {

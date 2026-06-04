@@ -115,12 +115,12 @@ export function changePassword(
   if (!row) throw new Error('User not found')
   if (!verifyPassword(oldPassword, row.password_hash)) throw new Error('Incorrect current password')
 
-  db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?')
+  db.prepare(`UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`)
     .run([hashPassword(newPassword), userId])
 }
 
 export function deactivateUser(db: DB, userId: number): void {
-  db.prepare('UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?')
+  db.prepare(`UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ?`)
     .run([userId])
 }
 
@@ -130,7 +130,7 @@ export function updateUser(
   data: { full_name?: string; role?: UserRole; pin?: string }
 ): User {
   // Build dynamic SET clause with positional params
-  const sets: string[] = ['updated_at = datetime('now')']
+  const sets: string[] = [`updated_at = datetime('now')`]
   const vals: unknown[] = []
 
   if (data.full_name) { sets.push('full_name = ?'); vals.push(data.full_name) }

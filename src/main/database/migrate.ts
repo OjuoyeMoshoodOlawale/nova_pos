@@ -277,6 +277,35 @@ CREATE INDEX IF NOT EXISTS idx_log_user   ON activity_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_log_action ON activity_log(action);
 CREATE INDEX IF NOT EXISTS idx_log_date   ON activity_log(logged_at);
 `,
+  '002_bulk_unit_pricing.sql': `
+-- ─── BULK / UNIT PRICING ─────────────────────────────────
+-- Each product can have two sale modes: unit and bulk
+-- e.g. sell 1 bottle (unit) OR 1 carton of 24 bottles (bulk)
+
+ALTER TABLE products ADD COLUMN bulk_unit         TEXT;
+ALTER TABLE products ADD COLUMN units_per_bulk    REAL DEFAULT 1;
+ALTER TABLE products ADD COLUMN bulk_buying_price REAL DEFAULT 0;
+ALTER TABLE products ADD COLUMN bulk_selling_price REAL DEFAULT 0;
+ALTER TABLE products ADD COLUMN has_bulk_pricing  INTEGER DEFAULT 0;
+
+-- Image support
+ALTER TABLE products ADD COLUMN image_data        TEXT;  -- base64 data URL
+
+-- ─── PURCHASE PRICE HISTORY ──────────────────────────────
+CREATE TABLE IF NOT EXISTS purchase_price_history (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+  cost_price  REAL    NOT NULL,
+  qty_bought  REAL,
+  sell_unit   TEXT    NOT NULL DEFAULT 'unit',
+  notes       TEXT,
+  recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  recorded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchase_history_product ON purchase_price_history(product_id);
+`,
 }
 
 // ─── Run migrations ───────────────────────────────────
@@ -310,3 +339,8 @@ export function runMigrations(db: DB): void {
   if (count === 0) logger.info('[Migrate] Database is up to date')
   else logger.info(`[Migrate] ${count} migration(s) applied`)
 }
+
+// ─── INLINE MIGRATION 002 ─────────────────────────────────
+// Injected directly into the MIGRATIONS object above.
+// Add this key to the MIGRATIONS record in migrate.ts:
+

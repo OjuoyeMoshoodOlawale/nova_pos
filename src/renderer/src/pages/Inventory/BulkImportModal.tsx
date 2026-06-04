@@ -12,6 +12,17 @@ export default function BulkImportModal({onClose, onSaved}: Props) {
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  function downloadTemplate() {
+    const headers = ['name','sku','barcode','category','unit','cost_price','selling_price','stock_qty','reorder_level','bulk_unit','units_per_bulk','bulk_buying_price','bulk_selling_price']
+    const example = ['Indomie Noodles 70g','INDO-001','6001234567890','Food','pcs',150,250,100,20,'carton',40,5500,9000]
+    const csv = [headers.join(','), example.join(',')].join('\n')
+    const blob = new Blob([csv], {type:'text/csv'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'novapos_import_template.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -50,6 +61,11 @@ export default function BulkImportModal({onClose, onSaved}: Props) {
           <button onClick={onClose}><X className="w-5 h-5 text-slate-400"/></button>
         </div>
         <div className="p-6 space-y-4">
+          <div className="flex justify-end mb-2">
+            <button onClick={downloadTemplate} className="btn-secondary text-xs flex items-center gap-1.5 py-1.5">
+              ⬇ Download CSV Template
+            </button>
+          </div>
           <div onClick={()=>fileRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition">
             <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2"/>
             <p className="font-medium text-slate-700">Click to upload CSV or Excel file</p>

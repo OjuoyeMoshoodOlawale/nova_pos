@@ -23,7 +23,7 @@ interface CartState {
 
   // Actions
   initSettings: (taxRate: number, taxInclusive: boolean, taxName: string, currency: string) => void
-  addItem:         (product: Product) => void
+  addItem:         (product: Product, mode?: 'unit'|'bulk') => void
   removeItem:      (productId: number) => void
   updateQty:       (productId: number, qty: number) => void
   setItemDiscount: (productId: number, pct: number) => void
@@ -78,32 +78,35 @@ export const useCartStore = create<CartState>((set, get) => ({
     set({ taxRate, taxInclusive, taxName, currencySymbol: currency })
   },
 
-  addItem(product) {
+  addItem(product, mode: 'unit'|'bulk' = 'unit') {
+    const isBulk = mode === 'bulk' && product.has_bulk_pricing && product.bulk_unit
+    const unitPrice  = isBulk ? product.bulk_selling_price  : product.selling_price
+    const costPrice  = isBulk ? product.bulk_buying_price   : product.cost_price
+    const unitLabel  = isBulk ? (product.bulk_unit || 'bulk') : product.unit
+    const itemKey    = `${product.id}_${mode}`
+
     set((s) => {
-      const existing = s.items.find((i) => i.product_id === product.id)
+      const existing = s.items.find((i) => i.product_id === product.id && i.sell_mode === mode)
       if (existing) {
-        // Increment quantity
         return {
           items: s.items.map((i) =>
-            i.product_id === product.id
-              ? {
-                  ...i,
-                  quantity: i.quantity + 1,
-                  line_total: computeLineTotal(i.unit_price, i.quantity + 1, i.discount_pct),
-                }
+            i.product_id === product.id && i.sell_mode === mode
+              ? { ...i, quantity: i.quantity + 1, line_total: computeLineTotal(i.unit_price, i.quantity + 1, i.discount_pct) }
               : i
           ),
         }
       }
       const newItem: CartItem = {
-        product_id: product.id,
-        product_name: product.name,
-        barcode: product.barcode,
-        unit_price: product.selling_price,
-        quantity: 1,
+        product_id:   product.id,
+        product_name: isBulk ? `${product.name} (${unitLabel})` : product.name,
+        barcode:      product.barcode,
+        unit_price:   unitPrice,
+        quantity:     1,
         discount_pct: 0,
-        line_total: product.selling_price,
-        cost_price: product.cost_price,
+        line_total:   unitPrice,
+        cost_price:   costPrice,
+        sell_mode:    mode,
+        unit_label:   unitLabel,
       }
       return { items: [...s.items, newItem] }
     })

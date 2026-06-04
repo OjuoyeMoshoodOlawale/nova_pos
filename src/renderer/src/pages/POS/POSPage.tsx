@@ -12,23 +12,35 @@ import {
   Pause, Zap, Package,
 } from 'lucide-react'
 
-function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product) => void }) {
+function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product, mode:'unit'|'bulk') => void }) {
   const { currencySymbol } = useCartStore()
   const out = product.stock_qty <= 0
   const low = !out && product.stock_qty <= product.reorder_level
   return (
-    <button onClick={() => !out && onAdd(product)} disabled={out}
-      className={`w-full text-left bg-white rounded-xl border p-3 transition-all
-        ${out ? 'opacity-40 cursor-not-allowed border-slate-100' : 'border-slate-100 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5'}`}>
-      <div className="flex items-center justify-center h-10 mb-2">
-        <Package className="w-8 h-8 text-slate-200" />
-      </div>
-      <p className="text-xs font-semibold text-slate-800 line-clamp-2 leading-snug min-h-[2rem]">{product.name}</p>
-      <p className="text-sm font-bold text-blue-600 mt-1">{currencySymbol}{product.selling_price.toLocaleString('en',{minimumFractionDigits:2})}</p>
-      <p className={`text-xs mt-0.5 ${out ? 'text-red-500' : low ? 'text-amber-500' : 'text-slate-400'}`}>
-        {out ? 'Out of stock' : low ? `Low: ${product.stock_qty}` : `${product.stock_qty} in stock`}
-      </p>
-    </button>
+    <div className={`bg-white rounded-xl border overflow-hidden transition-all
+      ${out ? 'opacity-40 border-slate-100' : 'border-slate-100 hover:border-blue-300 hover:shadow-md'}`}>
+      <button onClick={() => !out && onAdd(product,'unit')} disabled={out} className="w-full text-left p-3">
+        <div className="flex items-center justify-center h-10 mb-2">
+          {product.image_data
+            ? <img src={product.image_data} className="w-10 h-10 rounded object-cover"/>
+            : <Package className="w-8 h-8 text-slate-200"/>}
+        </div>
+        <p className="text-xs font-semibold text-slate-800 line-clamp-2 leading-snug min-h-[2rem]">{product.name}</p>
+        <p className="text-sm font-bold text-blue-600 mt-1">
+          {currencySymbol}{product.selling_price.toLocaleString('en',{minimumFractionDigits:2})}
+          <span className="text-xs font-normal text-slate-400 ml-1">/{product.unit}</span>
+        </p>
+        <p className={`text-xs mt-0.5 ${out?'text-red-500':low?'text-amber-500':'text-slate-400'}`}>
+          {out?'Out of stock':low?`Low: ${product.stock_qty}`:product.stock_qty+' in stock'}
+        </p>
+      </button>
+      {product.has_bulk_pricing && product.bulk_unit && !out && (
+        <button onClick={()=>onAdd(product,'bulk')}
+          className="w-full bg-amber-50 hover:bg-amber-100 border-t border-amber-100 px-3 py-1.5 text-xs font-medium text-amber-700 transition text-left">
+          + Bulk: {currencySymbol}{product.bulk_selling_price.toLocaleString('en',{minimumFractionDigits:2})}/{product.bulk_unit}
+        </button>
+      )}
+    </div>
   )
 }
 

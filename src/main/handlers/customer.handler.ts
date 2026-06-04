@@ -23,7 +23,7 @@ export function registerCustomerHandlers(db: DB): void {
   })
 
   safeHandle(CH.CUSTOMER_UPDATE, (_e, id: number, d: { full_name:string; phone?:string; email?:string; address?:string; notes?:string }) => {
-    db.prepare('UPDATE customers SET full_name=?, phone=?, email=?, address=?, notes=?, updated_at=datetime('now') WHERE id=?')
+    db.prepare(`UPDATE customers SET full_name=?, phone=?, email=?, address=?, notes=?, updated_at=datetime('now') WHERE id=?`)
       .run([d.full_name, d.phone??null, d.email??null, d.address??null, d.notes??null, id])
     return db.prepare('SELECT * FROM customers WHERE id=?').get([id])
   })

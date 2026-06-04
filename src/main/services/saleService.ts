@@ -47,7 +47,7 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run([id, item.product_id, item.product_name, item.unit_price, item.quantity, item.discount_pct, item.line_total, prod?.cost_price ?? 0])
 
-      db.prepare('UPDATE products SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?')
+      db.prepare(`UPDATE products SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?`)
         .run([qtyAfter, item.product_id])
 
       db.prepare(`
@@ -80,10 +80,10 @@ export function voidSale(db: DB, saleId: number, reason: string, userId: number)
   if (sale.status === 'voided') throw new Error('Sale is already voided')
 
   withTx(db, () => {
-    db.prepare("UPDATE sales SET status = 'voided', void_reason = ?, updated_at = datetime('now') WHERE id = ?")
+    db.prepare("UPDATE sales SET status = 'voided`, void_reason = ?, updated_at = datetime('now') WHERE id = ?")
       .run([reason, saleId])
 
-    const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as SaleItem[]
+    const items = db.prepare(`SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as SaleItem[]
     for (const item of items) {
       const prod = db.prepare('SELECT stock_qty FROM products WHERE id = ?').get([item.product_id]) as
         { stock_qty: number } | undefined
