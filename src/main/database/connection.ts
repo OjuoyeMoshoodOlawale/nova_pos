@@ -1,15 +1,12 @@
 // src/main/database/connection.ts
-// Pure WASM SQLite — no native compilation, works on any OS without build tools.
-// NOTE: No WAL mode — node-sqlite3-wasm on Windows does not reliably support it
-// and a single-user desktop app does not need concurrent write access.
 import { Database as NodeSqliteDb } from 'node-sqlite3-wasm'
 import { app } from 'electron'
 import path from 'node:path'
+import fs from 'node:fs'
 import logger from '../utils/logger'
 
 export type DB = InstanceType<typeof NodeSqliteDb>
 
-// ─── Transaction helper ───────────────────────────────────
 export function withTx<T>(db: DB, fn: () => T): T {
   db.exec('BEGIN')
   try {
@@ -22,8 +19,20 @@ export function withTx<T>(db: DB, fn: () => T): T {
   }
 }
 
-// ─── Singleton connection ─────────────────────────────────
 let _db: DB | null = null
+
+function openDatabase(dbPath: string): DB {
+  // Delete ALL SQLite-related files for this database
+  // so we start completely clean every time
+  for (const suffix of ['', '-shm', '-wal', '-journal']) {
+    const f = dbPath + suffix
+    if (fs.existsSync(f)) {
+      try { fs.unlinkSync(f); logger.warn(`[DB] Deleted: ${f}`) }
+      catch (e) { logger.error(`[DB] Could not delete ${f}: ${(e as Error).message}`) }
+    }
+  }
+  return new NodeSqliteDb(dbPath)
+}
 
 export function getDb(): DB {
   if (_db) return _db
@@ -31,19 +40,30 @@ export function getDb(): DB {
   const dbPath = path.join(app.getPath('userData'), 'novapos.db')
   logger.info(`[DB] Opening database at: ${dbPath}`)
 
-  _db = new NodeSqliteDb(dbPath)
+  try {
+    _db = new NodeSqliteDb(dbPath)
+    _db.exec('PRAGMA foreign_keys = ON')
+    _db.exec('PRAGMA synchronous  = NORMAL')
+    _db.exec('PRAGMA cache_size   = -16000')
+    _db.exec('PRAGMA temp_store   = MEMORY')
+  } catch (err) {
+    // If locked or corrupted — wipe and recreate
+    logger.warn(`[DB] Open failed (${(err as Error).message}) — wiping and retrying`)
+    try { if (_db) { _db.close(); _db = null } } catch { /* ignore */ }
 
-  // Keep it simple — no WAL mode for node-sqlite3-wasm on Windows
-  _db.exec('PRAGMA foreign_keys = ON')
-  _db.exec('PRAGMA synchronous  = NORMAL')
-  _db.exec('PRAGMA cache_size   = -16000')
-  _db.exec('PRAGMA temp_store   = MEMORY')
+    _db = openDatabase(dbPath)
+    _db.exec('PRAGMA foreign_keys = ON')
+    _db.exec('PRAGMA synchronous  = NORMAL')
+    _db.exec('PRAGMA cache_size   = -16000')
+    _db.exec('PRAGMA temp_store   = MEMORY')
+    logger.info('[DB] Database recreated after lock error')
+  }
 
   logger.info('[DB] Database opened (node-sqlite3-wasm)')
 
   app.on('before-quit', () => {
     if (_db) {
-      logger.info('[DB] Closing database connection')
+      logger.info('[DB] Closing database')
       _db.close()
       _db = null
     }
