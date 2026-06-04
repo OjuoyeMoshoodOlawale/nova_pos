@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1d4ed8"/>
+      <stop offset="100%" stop-color="#5b21b6"/>
+    </linearGradient>
+    <linearGradient id="screenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e0f2fe"/>
+      <stop offset="100%" stop-color="#ddd6fe"/>
+    </linearGradient>
+    <linearGradient id="btnGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- App background with rounded corners -->
+  <rect width="512" height="512" rx="88" ry="88" fill="url(#bg)"/>
+
+  <!-- Subtle grid overlay -->
+  <rect width="512" height="512" rx="88" fill="url(#bg)" opacity="0.5"/>
+
+  <!-- POS Terminal body -->
+  <rect x="110" y="90" width="292" height="210" rx="20" fill="white" opacity="0.18" filter="url(#shadow)"/>
+  <rect x="118" y="98" width="276" height="194" rx="14" fill="white" opacity="0.15"/>
+
+  <!-- Screen bezel -->
+  <rect x="130" y="108" width="252" height="160" rx="10" fill="#0f172a" opacity="0.6"/>
+  <!-- Screen glow -->
+  <rect x="134" y="112" width="244" height="152" rx="8" fill="url(#screenGrad)" opacity="0.9"/>
+
+  <!-- Screen content: receipt icon -->
+  <rect x="178" y="130" width="68" height="7" rx="3.5" fill="#1d4ed8" opacity="0.7"/>
+  <rect x="178" y="145" width="50" height="5" rx="2.5" fill="#94a3b8"/>
+  <rect x="178" y="158" width="60" height="5" rx="2.5" fill="#94a3b8"/>
+  <rect x="178" y="171" width="45" height="5" rx="2.5" fill="#94a3b8"/>
+  <!-- Total line -->
+  <rect x="178" y="188" width="100" height="1.5" rx="0.75" fill="#cbd5e1"/>
+  <rect x="178" y="198" width="38" height="6" rx="3" fill="#94a3b8"/>
+  <rect x="238" y="196" width="52" height="10" rx="5" fill="#1d4ed8" opacity="0.8"/>
+
+  <!-- Checkmark circle (green) on screen right side -->
+  <circle cx="306" cy="168" r="30" fill="url(#btnGrad)" opacity="0.95"/>
+  <polyline points="292,168 302,179 321,154"
+    stroke="white" stroke-width="5"
+    stroke-linecap="round" stroke-linejoin="round"
+    fill="none"/>
+
+  <!-- Terminal chin / card reader area -->
+  <rect x="130" y="275" width="252" height="24" rx="6" fill="white" opacity="0.12"/>
+  <rect x="140" y="280" width="120" height="10" rx="5" fill="white" opacity="0.25"/>
+
+  <!-- Keypad dots row 1 -->
+  <circle cx="195" cy="315" r="7" fill="white" opacity="0.55"/>
+  <circle cx="220" cy="315" r="7" fill="white" opacity="0.55"/>
+  <circle cx="245" cy="315" r="7" fill="white" opacity="0.55"/>
+  <!-- Keypad dots row 2 -->
+  <circle cx="195" cy="338" r="7" fill="white" opacity="0.55"/>
+  <circle cx="220" cy="338" r="7" fill="white" opacity="0.55"/>
+  <circle cx="245" cy="338" r="7" fill="white" opacity="0.55"/>
+  <!-- Enter key -->
+  <rect x="262" y="308" width="50" height="36" rx="7" fill="url(#btnGrad)" opacity="0.9"/>
+  <polyline points="275,326 282,333 298,316"
+    stroke="white" stroke-width="3.5"
+    stroke-linecap="round" stroke-linejoin="round"
+    fill="none"/>
+
+  <!-- Terminal base stand -->
+  <rect x="200" y="360" width="112" height="14" rx="7" fill="white" opacity="0.7"/>
+  <rect x="175" y="372" width="162" height="14" rx="7" fill="white" opacity="0.5"/>
+
+  <!-- Receipt strip -->
+  <rect x="224" y="384" width="64" height="88" rx="3" fill="white" opacity="0.95" filter="url(#shadow)"/>
+  <rect x="232" y="394" width="48" height="4" rx="2" fill="#cbd5e1"/>
+  <rect x="232" y="406" width="36" height="4" rx="2" fill="#cbd5e1"/>
+  <rect x="232" y="418" width="42" height="4" rx="2" fill="#cbd5e1"/>
+  <rect x="232" y="430" width="48" height="4" rx="2" fill="#1d4ed8" opacity="0.5"/>
+  <rect x="232" y="442" width="30" height="4" rx="2" fill="#cbd5e1"/>
+  <!-- Zigzag receipt bottom -->
+  <path d="M224 472 l5.3-8 l5.3 8 l5.3-8 l5.3 8 l5.3-8 l5.3 8 l5.3-8 l5.3 8 l5.3-8 l5.3 8 l5.4-8 l5.4 8"
+    stroke="white" stroke-width="2.5" fill="none" opacity="0.8"/>
+</svg>

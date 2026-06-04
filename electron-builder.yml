@@ -1,0 +1,59 @@
+appId: com.novapos.desktop
+productName: NovaPOS
+copyright: Copyright © 2026
+
+directories:
+  output: dist/installers
+  buildResources: resources
+
+# Include only what's needed
+files:
+  - out/**/*
+  - resources/icon.*
+  - package.json
+
+# Embed all node_modules into the asar
+asar: true
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: NovaPOS-Setup-${version}.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: NovaPOS
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  installerHeaderIcon: resources/icon.ico
+
+mac:
+  icon: resources/icon.png
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  artifactName: NovaPOS-${version}.${ext}
+  category: public.app-category.business
+
+linux:
+  icon: resources/icon.png
+  target:
+    - target: AppImage
+      arch: [x64]
+  artifactName: NovaPOS-${version}.${ext}
+  category: Office
+
+# Auto-update config (optional — configure your update server)
+publish:
+  provider: generic
+  url: https://your-update-server.com/updates/
+
+# Prevent source maps in production
+extraMetadata:
+  main: out/main/index.js

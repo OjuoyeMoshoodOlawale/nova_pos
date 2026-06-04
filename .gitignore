@@ -1,0 +1,46 @@
+# ── Dependencies ─────────────────────────────────────
+node_modules/
+
+# ── Build output ─────────────────────────────────────
+out/
+dist/
+dist-electron/
+
+# ── Packaged installers ───────────────────────────────
+dist/installers/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# ── Environment / secrets ────────────────────────────
+.env
+# .env.example is committed — it has no real secrets
+
+# ── Database files ────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+*.db.gz
+
+# ── Logs ─────────────────────────────────────────────
+*.log
+logs/
+
+# ── TypeScript build info ─────────────────────────────
+*.tsbuildinfo
+
+# ── OS files ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ───────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── Electron builder cache ────────────────────────────
+.electron-builder/

@@ -1,0 +1,283 @@
+// src/main/services/reportService.ts
+import type { DB } from '../database/connection'
+import { format, endOfMonth, startOfYear, endOfYear, eachDayOfInterval } from 'date-fns'
+import { DailyReportData, WeeklyReportData, MonthlyReportData, InventoryReportData, ProfitLossData } from '@shared/types'
+import { getBusinessProfile } from './settingsService'
+
+function getProfile(db: DB) {
+  const p = getBusinessProfile(db)
+  return { businessName: p?.name ?? 'My Business', currency: p?.currency_symbol ?? '₦' }
+}
+
+type PayRow   = { method: string; total: number; count: number }
+type ProdRow  = { name: string; qty: number; revenue: number; cost: number }
+type CashierRow = { name: string; sales: number; revenue: number }
+type HourRow  = { hour: number; revenue: number; count: number }
+
+// ─── Daily report ─────────────────────────────────────────
+export function buildDailyReport(db: DB, date: string): DailyReportData {
+  const { businessName, currency } = getProfile(db)
+  const s = `${date} 00:00:00`
+  const e = `${date} 23:59:59`
+
+  const totals = db.prepare(`
+    SELECT COALESCE(SUM(total_amount),0) AS totalRevenue,
+           COUNT(*) AS transactionCount,
+           COALESCE(SUM(discount_amt),0) AS discountGiven,
+           COALESCE(SUM(tax_amount),0) AS taxCollected,
+           SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END) AS voidCount
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status != 'held'
+  `).get([s, e]) as { totalRevenue:number; transactionCount:number; discountGiven:number; taxCollected:number; voidCount:number }
+
+  const cogs = db.prepare(`
+    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS totalCost
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+  `).get([s, e]) as { totalCost: number }
+
+  const payBreakdown = db.prepare(`
+    SELECT p.method, SUM(p.amount) AS total, COUNT(*) AS count
+    FROM payments p JOIN sales s ON p.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY p.method
+  `).all([s, e]) as PayRow[]
+
+  const topProducts = db.prepare(`
+    SELECT si.product_name AS name, SUM(si.quantity) AS qty, SUM(si.line_total) AS revenue
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY si.product_id ORDER BY revenue DESC LIMIT 10
+  `).all([s, e]) as ProdRow[]
+
+  const cashierPerf = db.prepare(`
+    SELECT u.full_name AS name, COUNT(s.id) AS sales, COALESCE(SUM(s.total_amount),0) AS revenue
+    FROM sales s JOIN users u ON s.served_by = u.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY s.served_by ORDER BY revenue DESC
+  `).all([s, e]) as CashierRow[]
+
+  const hourlySales = db.prepare(`
+    SELECT CAST(strftime('%H', sale_date) AS INTEGER) AS hour,
+           SUM(total_amount) AS revenue, COUNT(*) AS count
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+    GROUP BY hour ORDER BY hour
+  `).all([s, e]) as HourRow[]
+
+  const grossProfit = totals.totalRevenue - cogs.totalCost
+
+  return {
+    date, businessName, currency,
+    totalRevenue: totals.totalRevenue, totalSales: totals.totalRevenue,
+    totalCost: cogs.totalCost, grossProfit,
+    profitMarginPct: totals.totalRevenue > 0 ? (grossProfit / totals.totalRevenue) * 100 : 0,
+    transactionCount: totals.transactionCount, voidCount: totals.voidCount,
+    discountGiven: totals.discountGiven, taxCollected: totals.taxCollected,
+    paymentBreakdown: payBreakdown, topProducts, cashierPerformance: cashierPerf, hourlySales,
+  }
+}
+
+// ─── Monthly report ───────────────────────────────────────
+export function buildMonthlyReport(db: DB, year: number, month: number): MonthlyReportData {
+  const { businessName } = getProfile(db)
+  const monthStart = format(new Date(year, month-1, 1), 'yyyy-MM-dd')
+  const monthEnd   = format(endOfMonth(new Date(year, month-1)), 'yyyy-MM-dd')
+  const s = `${monthStart} 00:00:00`, e = `${monthEnd} 23:59:59`
+
+  const totals = db.prepare(`
+    SELECT COALESCE(SUM(total_amount),0) AS totalRevenue, COUNT(*) AS totalTransactions
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+  `).get([s, e]) as { totalRevenue: number; totalTransactions: number }
+
+  const cogs = db.prepare(`
+    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS totalCost
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+  `).get([s, e]) as { totalCost: number }
+
+  const days = eachDayOfInterval({ start: new Date(year, month-1, 1), end: endOfMonth(new Date(year, month-1)) })
+  const dailyRows = db.prepare(`
+    SELECT strftime('%Y-%m-%d', sale_date) AS date, SUM(total_amount) AS revenue, COUNT(*) AS count
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+    GROUP BY strftime('%Y-%m-%d', sale_date)
+  `).all([s, e]) as { date:string; revenue:number; count:number }[]
+
+  const dailyMap = new Map(dailyRows.map((r) => [r.date, r]))
+  const dailyBreakdown = days.map((d) => {
+    const key = format(d, 'yyyy-MM-dd')
+    return { date: key, revenue: dailyMap.get(key)?.revenue ?? 0, count: dailyMap.get(key)?.count ?? 0 }
+  })
+
+  const weeklyRows = db.prepare(`
+    SELECT strftime('%W', sale_date) AS week, SUM(total_amount) AS revenue, COUNT(*) AS count
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+    GROUP BY week ORDER BY week
+  `).all([s, e]) as { week:string; revenue:number; count:number }[]
+
+  const topProducts = db.prepare(`
+    SELECT si.product_name AS name, SUM(si.quantity) AS qty, SUM(si.line_total) AS revenue
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY si.product_id ORDER BY revenue DESC LIMIT 10
+  `).all([s, e]) as ProdRow[]
+
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+  return {
+    weekStart: monthStart, weekEnd: monthEnd,
+    totalRevenue: totals.totalRevenue, totalTransactions: totals.totalTransactions,
+    dailyBreakdown, topProducts,
+    grossProfit: totals.totalRevenue - cogs.totalCost,
+    month: `${MONTH_NAMES[month-1]} ${year}`, year,
+    weeklyBreakdown: weeklyRows.map((r) => ({ week: `Week ${r.week}`, revenue: r.revenue, count: r.count })),
+  }
+}
+
+// ─── Yearly report ────────────────────────────────────────
+export function buildYearlyReport(db: DB, year: number) {
+  const { businessName, currency } = getProfile(db)
+  const s = `${year}-01-01 00:00:00`, e = `${year}-12-31 23:59:59`
+
+  const totals = db.prepare(`
+    SELECT COALESCE(SUM(total_amount),0) AS totalRevenue,
+           COUNT(*) AS totalTransactions,
+           COALESCE(SUM(discount_amt),0) AS totalDiscounts,
+           COALESCE(SUM(tax_amount),0) AS totalTax
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+  `).get([s, e]) as { totalRevenue:number; totalTransactions:number; totalDiscounts:number; totalTax:number }
+
+  const cogs = db.prepare(`
+    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS totalCost
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+  `).get([s, e]) as { totalCost: number }
+
+  const monthlyRows = db.prepare(`
+    SELECT CAST(strftime('%m', sale_date) AS INTEGER) AS month,
+           SUM(total_amount) AS revenue, COUNT(*) AS count
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+    GROUP BY month ORDER BY month
+  `).all([s, e]) as { month:number; revenue:number; count:number }[]
+
+  const monthMap = new Map(monthlyRows.map((r) => [r.month, r]))
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const monthlyBreakdown = Array.from({length:12},(_,i)=>({
+    month: MONTH_NAMES[i], revenue: monthMap.get(i+1)?.revenue ?? 0, count: monthMap.get(i+1)?.count ?? 0,
+  }))
+
+  const topProducts = db.prepare(`
+    SELECT si.product_name AS name, SUM(si.quantity) AS qty, SUM(si.line_total) AS revenue
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY si.product_id ORDER BY revenue DESC LIMIT 20
+  `).all([s, e]) as ProdRow[]
+
+  const categoryRevenue = db.prepare(`
+    SELECT COALESCE(c.name,'Uncategorised') AS category,
+           SUM(si.line_total) AS revenue, COUNT(si.id) AS count
+    FROM sale_items si JOIN sales sv ON si.sale_id = sv.id
+    JOIN products p ON si.product_id = p.id
+    LEFT JOIN categories c ON p.category_id = c.id
+    WHERE sv.sale_date BETWEEN ? AND ? AND sv.status = 'completed'
+    GROUP BY c.name ORDER BY revenue DESC
+  `).all([s, e])
+
+  const cashierPerf = db.prepare(`
+    SELECT u.full_name AS name, COUNT(s.id) AS sales, COALESCE(SUM(s.total_amount),0) AS revenue
+    FROM sales s JOIN users u ON s.served_by = u.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY s.served_by ORDER BY revenue DESC
+  `).all([s, e]) as CashierRow[]
+
+  const grossProfit = totals.totalRevenue - cogs.totalCost
+
+  return {
+    year, businessName, currency,
+    totalRevenue: totals.totalRevenue, totalTransactions: totals.totalTransactions,
+    totalDiscounts: totals.totalDiscounts, totalTax: totals.totalTax,
+    totalCost: cogs.totalCost, grossProfit,
+    profitMarginPct: totals.totalRevenue > 0 ? (grossProfit/totals.totalRevenue)*100 : 0,
+    monthlyBreakdown, topProducts, categoryRevenue, cashierPerformance: cashierPerf,
+  }
+}
+
+// ─── Inventory report ─────────────────────────────────────
+export function buildInventoryReport(db: DB): InventoryReportData {
+  const products = db.prepare(`
+    SELECT p.*, c.name AS category_name, s.name AS supplier_name
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN suppliers  s ON p.supplier_id  = s.id
+    WHERE p.is_active = 1
+  `).all() as any[]
+
+  const totalStockValue  = products.reduce((s,p) => s + p.cost_price    * p.stock_qty, 0)
+  const totalRetailValue = products.reduce((s,p) => s + p.selling_price  * p.stock_qty, 0)
+  const lowStockItems    = products.filter(p => p.stock_qty <= p.reorder_level && p.stock_qty > 0)
+  const outOfStockItems  = products.filter(p => p.stock_qty <= 0)
+
+  const thirtyDaysAgo = format(new Date(Date.now() - 30*86400000), 'yyyy-MM-dd 00:00:00')
+  const recentSales   = db.prepare(`
+    SELECT si.product_id, SUM(si.quantity) AS totalSold
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date >= ? AND s.status = 'completed'
+    GROUP BY si.product_id
+  `).all([thirtyDaysAgo]) as { product_id:number; totalSold:number }[]
+
+  const soldMap = new Map(recentSales.map(r => [r.product_id, r.totalSold]))
+  const topMovingProducts  = products.map(p => ({ product:p, totalSold: soldMap.get(p.id)??0 })).sort((a,b)=>b.totalSold-a.totalSold).slice(0,10)
+  const slowMovingProducts = products.filter(p => !soldMap.has(p.id) && p.stock_qty > 0).map(p => ({ product:p, daysSinceLastSale:30 })).slice(0,10)
+
+  const catMap = new Map<string,{count:number;value:number}>()
+  for (const p of products) {
+    const cat  = p.category_name ?? 'Uncategorised'
+    const prev = catMap.get(cat) ?? { count:0, value:0 }
+    catMap.set(cat, { count: prev.count+1, value: prev.value + p.cost_price*p.stock_qty })
+  }
+  const categoryBreakdown = [...catMap.entries()].map(([category,v]) => ({ category, count:v.count, value:v.value }))
+
+  return {
+    generatedAt: new Date().toISOString(), totalProducts: products.length,
+    totalStockValue, totalRetailValue, lowStockItems, outOfStockItems,
+    overstockItems: [], topMovingProducts, slowMovingProducts, categoryBreakdown,
+  }
+}
+
+// ─── P&L ─────────────────────────────────────────────────
+export function buildProfitLoss(db: DB, dateFrom: string, dateTo: string): ProfitLossData {
+  const s = `${dateFrom} 00:00:00`, e = `${dateTo} 23:59:59`
+
+  const sales = db.prepare(`
+    SELECT COALESCE(SUM(total_amount),0) AS revenue,
+           COALESCE(SUM(discount_amt),0) AS discounts,
+           COALESCE(SUM(tax_amount),0) AS tax
+    FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
+  `).get([s, e]) as { revenue:number; discounts:number; tax:number }
+
+  const cogs = db.prepare(`
+    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS cost
+    FROM sale_items si JOIN sales sv ON si.sale_id = sv.id
+    WHERE sv.sale_date BETWEEN ? AND ? AND sv.status = 'completed'
+  `).get([s, e]) as { cost: number }
+
+  const grossProfit = sales.revenue - cogs.cost
+  return {
+    period: `${dateFrom} to ${dateTo}`, revenue: sales.revenue,
+    cogs: cogs.cost, grossProfit,
+    grossMargin: sales.revenue > 0 ? (grossProfit/sales.revenue)*100 : 0,
+    totalDiscounts: sales.discounts, taxCollected: sales.tax,
+    netRevenue: sales.revenue - sales.discounts,
+  }
+}
+
+// ─── X/Z Reports ─────────────────────────────────────────
+export function buildXReport(db: DB, _userId: number) {
+  return buildDailyReport(db, format(new Date(), 'yyyy-MM-dd'))
+}
+
+export function buildZReport(db: DB, userId: number) {
+  const today  = format(new Date(), 'yyyy-MM-dd')
+  const report = buildDailyReport(db, today)
+  db.prepare("INSERT INTO activity_log (user_id, action, detail) VALUES (?, 'report.zreport', ?)")
+    .run([userId, `Z-Report ${today}, Revenue: ${report.totalRevenue}`])
+  return report
+}
