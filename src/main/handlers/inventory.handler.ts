@@ -14,7 +14,7 @@ export function registerInventoryHandlers(db: DB): void {
 
     return withTx(db, () => {
       db.prepare("UPDATE products SET stock_qty=?, updated_at=datetime('now') WHERE id=?").run([qtyAfter, dto.product_id])
-      const r = db.prepare(`INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason, notes) VALUES (?,?,?,?,?,?,?)')
+      const r = db.prepare(`INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason, notes) VALUES (?,?,?,?,?,?,?)`)
         .run([dto.product_id, dto.adjusted_by, qtyBefore, dto.qty_change, qtyAfter, dto.reason, dto.notes??null])
       return db.prepare(`
         SELECT sa.*, p.name AS product_name, u.full_name AS adjuster_name
