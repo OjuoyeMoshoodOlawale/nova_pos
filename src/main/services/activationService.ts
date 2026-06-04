@@ -42,7 +42,7 @@ export function activate(db: DB, key: string, businessName: string): ActivationR
       machine_id     = excluded.machine_id,
       activation_key = excluded.activation_key,
       business_name  = excluded.business_name,
-      activated_at   = datetime('now`)
+      activated_at   = datetime('now')
   `).run([machineId, key.trim().toUpperCase(), businessName])
 
   logger.info(`[Activation] Software activated for: ${businessName}`)

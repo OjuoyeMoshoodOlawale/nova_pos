@@ -27,7 +27,7 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
         receipt_no, customer_id, served_by,
         subtotal, discount_pct, discount_amt,
         tax_amount, total_amount, amount_paid, change_given, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed`)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
     `).run([
       receiptNo, input.customer_id ?? null, input.served_by,
       subtotal, input.discount_pct, input.discount_amt,
@@ -80,7 +80,7 @@ export function voidSale(db: DB, saleId: number, reason: string, userId: number)
   if (sale.status === 'voided') throw new Error('Sale is already voided')
 
   withTx(db, () => {
-    db.prepare("UPDATE sales SET status = 'voided`, void_reason = ?, updated_at = datetime('now') WHERE id = ?")
+    db.prepare("UPDATE sales SET status = 'voided', void_reason = ?, updated_at = datetime('now') WHERE id = ?")
       .run([reason, saleId])
 
     const items = db.prepare(`SELECT * FROM sale_items WHERE sale_id = ?`).all([saleId]) as SaleItem[]

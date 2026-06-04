@@ -62,7 +62,7 @@ export function createProduct(db: DB, dto: CreateProductDto): Product {
   `).run([
     dto.name, dto.sku ?? null, dto.barcode ?? null,
     dto.category_id ?? null, dto.supplier_id ?? null, dto.parent_id ?? null,
-    dto.unit ?? 'pcs`, dto.cost_price, dto.selling_price,
+    dto.unit ?? 'pcs', dto.cost_price, dto.selling_price,
     dto.stock_qty ?? 0, dto.reorder_level ?? 5,
     dto.image_path ?? null, dto.description ?? null,
   ])
