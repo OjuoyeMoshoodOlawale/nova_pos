@@ -1,266 +1,222 @@
 # NovaPOS — Desktop Point of Sale System
 
-> Offline-first desktop POS for Nigerian SMBs. Built with Electron + React + SQLite.
+> Offline-first desktop POS for Nigerian SMBs. Electron + React + SQLite (WASM). No monthly fees, no internet required.
 
 ---
 
 ## Quick Start (Developer)
 
-### Prerequisites
-- Node.js 18+ and npm
-- Windows 10/11, macOS 12+, or Ubuntu 20.04+
-
-### Install & run
-
 ```bash
-# 1. Clone or extract the project folder
-cd nova-pos
-
-# 2. Install dependencies
+git clone https://github.com/OjuoyeMoshoodOlawale/nova_pos.git
+cd nova_pos
 npm install
-
-# 3. Set your developer secret (REQUIRED – change from default!)
-cp .env.example .env
-# Edit .env and set NOVA_DEV_SECRET to a long random string
-
-# 4. Start in development mode (hot-reload)
 npm run dev
 ```
 
-### Build installer
+> **First time?** You need Node.js 18+ installed. No other tools required — SQLite is pure WASM.
+
+---
+
+## 🔑 Activation Key System (Vendor Workflow)
+
+Every copy of NovaPOS is **locked to the specific machine** it is installed on. A key that works on one PC will not work on another.
+
+### Step 1 — Client sends you their Machine ID
+
+When the client launches the app for the first time, they see the **Activation Screen** which displays their unique Machine ID, e.g.:
+
+```
+fc86a0cec042865ac0d73322d3a0b24862b56787895d03b4acca4f7d8c146739
+```
+
+They copy it and send it to you (WhatsApp, email, etc.).
+
+---
+
+### Step 2 — You generate their activation key
+
+Open a terminal in the `nova_pos` folder and run:
 
 ```bash
-# Windows (.exe installer)
+node scripts/gen-activation-key.js <MACHINE-ID>
+```
+
+**Example:**
+```bash
+node scripts/gen-activation-key.js fc86a0cec042865ac0d73322d3a0b24862b56787895d03b4acca4f7d8c146739
+```
+
+**Output:**
+```
+✅ Activation Key Generated
+   Machine ID : fc86a0cec042865ac0d73322d3a0b24862b56787895d03b4acca4f7d8c146739
+   Key        : NOVA-4CB8-65FB-0C28-3CD8
+
+Send this key to the client.
+```
+
+---
+
+### Step 3 — Client enters the key
+
+The client types their **Business Name** and pastes the key `NOVA-4CB8-65FB-0C28-3CD8` into the activation screen, then clicks **Activate Software**.
+
+The app validates the key against the machine ID and opens the 9-step Setup Wizard.
+
+---
+
+### ⚠️ Before deploying to real clients — set your own secret
+
+The default secret (`nova-default-dev-secret-v1-CHANGE-ME`) is public. Before you sell to clients, create a `.env` file with your own private secret:
+
+```bash
+# nova_pos/.env
+NOVA_DEV_SECRET=my-super-secret-long-random-string-2024
+```
+
+Then rebuild:
+```bash
 npm run build:win
-
-# macOS (.dmg)
-npm run build:mac
-
-# Linux (.AppImage)
-npm run build:linux
-
-# Output → dist/installers/
 ```
+
+**Keep your secret safe.** If you lose it, you cannot generate new keys for your existing clients. Store it in a password manager.
 
 ---
 
-## 🔑 Activation System (Vendor Workflow)
+## 👨‍💻 Developer Maintenance Password
 
-Every installation is tied to the client's machine. They **cannot** copy the app to another computer without a new key.
+For remote client support without knowing the client's admin password. The password **rotates every 30 minutes** — it is never stored anywhere.
 
-**Step 1 — Client installs the app**
-```
-The activation screen shows their Machine ID automatically.
-They copy it and send it to you (the vendor).
-```
-
-**Step 2 — Vendor generates key**
-```bash
-NOVA_DEV_SECRET=your-secret node scripts/gen-activation-key.js <machine-id>
-# → NOVA-A1B2-C3D4-E5F6-G7H8
-```
-
-**Step 3 — Client enters key**
-```
-They paste the key into the activation screen.
-One key = one machine, forever. No internet required.
-```
-
-> ⚠️ Keep `NOVA_DEV_SECRET` in your password manager. If you lose it, you cannot generate keys for existing clients.
-
----
-
-## 👨‍💻 Developer Login (Maintenance Access)
-
-For remote support without knowing the client's password:
+### How to get the current developer password
 
 ```bash
-# Get current developer password (rotates every 30 min)
-NOVA_DEV_SECRET=your-secret node scripts/get-dev-password.js
-
-# Login with:
-# Username:  nova.support
-# Password:  <output above>
+node scripts/get-dev-password.js
 ```
 
-- The password rotates every 30 minutes automatically
-- The client can disable this access in Settings → Developer
-- No password is stored in the database — it's computed on-the-fly
+**Output:**
+```
+🔐 Developer Maintenance Password
+   Username       : nova.support
+   Current Pass   : abc123def456  (expires in ~18 min)
+   Previous Pass  : 9f2e1b8c7a3d  (still valid during transition)
+
+This is a rotating password — rerun this script if it expires.
+```
+
+### Login with it
+
+On the NovaPOS login screen:
+- **Username:** `nova.support`
+- **Password:** the current password from above
+
+> The client can disable this access in **Settings → Developer → Allow developer maintenance login**.
 
 ---
 
 ## 📦 Project Structure
 
 ```
-nova-pos/
+nova_pos/
 ├── src/
 │   ├── main/                    ← Electron main process (Node.js)
-│   │   ├── database/            ← SQLite connection (WAL mode), migrations
-│   │   ├── handlers/            ← IPC handler registration (one per module)
-│   │   ├── services/            ← Business logic (auth, products, sales, reports)
-│   │   ├── hardware/            ← Thermal receipt printer service
-│   │   ├── mailer/              ← Email reports + backup via Gmail/SMTP
-│   │   ├── network/             ← LAN multi-computer server + client adapter
-│   │   └── utils/               ← safeHandle, encrypt, machineId, logger
-│   ├── preload/                 ← contextBridge — exposes window.api to renderer
-│   └── renderer/                ← React frontend (never touches SQLite directly)
-│       ├── src/pages/
-│       │   ├── Activation/      ← License key screen
-│       │   ├── Setup/           ← 9-step wizard (runs once on first launch)
-│       │   ├── Login/           ← Username + password
-│       │   ├── Dashboard/       ← Live sales metrics + charts
-│       │   ├── POS/             ← Register: barcode scan, cart, payment
-│       │   ├── Inventory/       ← Products CRUD + stock adjustment + CSV import
-│       │   ├── Sales/           ← Sales history, void, reprint
-│       │   ├── Reports/         ← Daily / Monthly / Yearly / Inventory / P&L
-│       │   ├── Customers/       ← Customer management + purchase history
-│       │   ├── Suppliers/       ← Supplier directory
-│       │   ├── Staff/           ← User accounts + roles + PIN
-│       │   └── Settings/        ← Business, receipt, email, printer, network, backup
-│       ├── src/store/           ← Zustand: auth, app, cart
-│       └── src/components/      ← Shared: DataTable, MainLayout, Toasts
-├── shared/                      ← types.ts + ipcChannels.ts (shared by both sides)
-├── scripts/                     ← gen-activation-key.js, get-dev-password.js
-├── resources/                   ← App icons (ICO, PNG)
-└── .env.example                 ← Copy to .env before running
+│   │   ├── database/            ← SQLite connection + migrations (inline SQL)
+│   │   ├── handlers/            ← IPC handlers (one per module)
+│   │   ├── services/            ← Business logic (auth, sales, reports...)
+│   │   ├── hardware/            ← Thermal receipt printer
+│   │   ├── mailer/              ← Email reports + Gmail/SMTP backup
+│   │   └── network/             ← LAN multi-computer server + client
+│   ├── preload/                 ← contextBridge (window.api.*)
+│   └── renderer/                ← React frontend
+│       ├── pages/Activation/    ← License key screen
+│       ├── pages/Setup/         ← 9-step setup wizard
+│       ├── pages/POS/           ← Register: scan, cart, payment
+│       ├── pages/Inventory/     ← Products CRUD + stock adjustment
+│       ├── pages/Sales/         ← Sales history, void, reprint
+│       ├── pages/Reports/       ← Daily / Monthly / Yearly / P&L
+│       ├── pages/Dashboard/     ← Live metrics + charts
+│       ├── pages/Settings/      ← All configuration tabs
+│       └── pages/Staff/         ← User accounts + roles
+├── shared/                      ← types.ts + ipcChannels.ts
+├── scripts/
+│   ├── gen-activation-key.js    ← Generate key for a machine ID
+│   └── get-dev-password.js      ← Get current dev maintenance password
+├── resources/                   ← App icons
+├── .env.example                 ← Copy to .env and set NOVA_DEV_SECRET
+└── README.md
 ```
-
----
-
-## 🗄️ Database
-
-- **Engine:** SQLite via `better-sqlite3`
-- **Mode:** WAL (Write-Ahead Logging) — survives crashes, concurrent reads
-- **Location:** `%APPDATA%\novapos\novapos.db` (Windows) or `~/Library/Application Support/novapos/novapos.db` (Mac)
-- **Security:** No plain-text passwords or secrets stored. Passwords use `scrypt`. SMTP password is AES-256-GCM encrypted using the machine ID as key material.
-
----
-
-## 📊 Reports
-
-| Report | Coverage | Auto-email |
-|--------|----------|------------|
-| Daily  | Revenue, transactions, top products, hourly chart, cashier performance | Yes (configurable time) |
-| Monthly | Day-by-day breakdown, weekly summary, top products, gross profit | On demand |
-| Yearly | Month-by-month, category revenue, staff ranking, P&L | On demand |
-| Inventory | Stock value, low stock, out of stock, slow-movers, by category | On demand |
-| P&L | Revenue, COGS, gross profit, margin, discounts, tax | On demand |
 
 ---
 
 ## 💾 Backup
 
-Configure in Setup Wizard (Step 9) or Settings → Backup:
+Configure in **Setup Wizard (Step 9)** or **Settings → Backup**:
 
 | Option | What happens |
 |--------|-------------|
-| Local folder | `.db.gz` saved to configured path, last 7 kept automatically |
-| Email (Gmail) | Compressed backup attached to email via your SMTP settings |
+| Local folder | `.db.gz` saved to chosen path, last 7 kept automatically |
+| Email (Gmail) | Compressed backup sent as attachment via your SMTP config |
 | Both | Both of the above |
 
-**Gmail setup:**
-1. Go to `myaccount.google.com/security`
-2. Enable 2-Step Verification
-3. Search "App Passwords" → create one for "Mail"
-4. Paste the 16-character app password into Settings → Email → Password
+**Gmail App Password setup:**
+1. Google Account → Security → 2-Step Verification (enable it)
+2. Search "App Passwords" → create one for Mail
+3. Paste the 16-character password into **Settings → Email → Password**
 
 ---
 
 ## 🌐 LAN Multi-Computer Mode
 
-Run the POS on multiple computers sharing one database:
+Share one database across multiple POS terminals:
 
-1. **Server computer:** Settings → Network → Mode: Server → Save
-2. **Client computers:** Settings → Network → Mode: Client → Enter server IP → Save
-3. All computers must use the same Shared Secret
-
-The server computer's database is the source of truth. Client computers send all operations over HTTP RPC to the server.
+1. **Server PC:** Settings → Network → Mode: Server → Save
+2. **Client PCs:** Settings → Network → Mode: Client → Enter server's IP → Save
+3. All PCs must use the same Shared Secret
 
 ---
 
-## 🛠️ IPC Security
-
-- `contextIsolation: true` — renderer cannot access Node.js APIs directly
-- `nodeIntegration: false` — no `require()` in renderer
-- All database access goes through `ipcMain.handle` → service layer → SQLite
-- DevTools, F12, and Ctrl+Shift+I are disabled in production builds
-- Right-click context menu is disabled in production builds
-
----
-
-## 🚀 Deployment Checklist
-
-- [ ] Set `NOVA_DEV_SECRET` to a unique random string (save in your password manager)
-- [ ] Run `npm run build:win` (or mac/linux)
-- [ ] Install on client computer
-- [ ] Generate activation key using `scripts/gen-activation-key.js`
-- [ ] Activate the software on the client machine
-- [ ] Complete the 9-step setup wizard with the client:
-  - Business name, type, address, phone
-  - Tax rate and name (e.g. VAT 7.5%)
-  - Admin account (client-chosen password)
-  - Email/Gmail for reports (optional)
-  - Receipt header/footer customization
-  - Thermal printer selection + test print
-  - Opening stock entry
-  - Network mode (standalone for single PC)
-  - Backup schedule
-- [ ] Train staff on POS register and basic operations
-
----
-
-## 📦 npm Scripts
+## 🚀 Build Windows Installer
 
 ```bash
-npm run dev          # Start with hot-reload (dev)
-npm run build        # Compile TypeScript only
-npm run build:win    # Package Windows installer
-npm run build:mac    # Package macOS DMG
-npm run build:linux  # Package Linux AppImage
-npm run typecheck    # TypeScript type check (no emit)
-npm run lint         # ESLint
+npm run build:win
+# Output: dist/installers/NovaPOS-Setup-1.0.0.exe
 ```
 
 ---
 
-## 🧰 Tech Stack
+## 🛠️ Troubleshooting
 
-| Layer | Technology |
-|-------|------------|
-| Runtime | Electron 31 |
-| Frontend | React 18, Vite 5, TypeScript 5 |
-| Build system | electron-vite 2 |
-| Database | SQLite via better-sqlite3 9 (WAL mode) |
-| State | Zustand 4 |
-| Styling | Tailwind CSS 3 |
-| Charts | Recharts 2 |
-| Email | Nodemailer 6 |
-| Printing | electron-pos-printer 3 |
-| Barcodes | JsBarcode |
-| CSV import | PapaParse |
-| Packaging | electron-builder 24 |
+### "database is locked"
+Another Electron window is already open. Close it first, then run `npm run dev`.
+On Windows you can also kill it forcefully:
+```bash
+taskkill /f /im electron.exe
+```
 
----
+### "Invalid activation key"
+- Make sure you copied the full Machine ID from the activation screen
+- Run `node scripts/gen-activation-key.js <machine-id>` again
+- Check that your `.env` `NOVA_DEV_SECRET` matches what was used when the app was built
 
-## 🆘 Troubleshooting
-
-**"Database is locked" error**
-The WAL mode + 5-second busy timeout handles most cases automatically. If it persists, ensure only one instance is running (`app.requestSingleInstanceLock()`).
-
-**Receipt not printing**
-1. Settings → Printer → confirm correct printer is selected
-2. Click "Test Print"
+### Receipt not printing
+1. Settings → Printer → select your thermal printer
+2. Click Test Print
 3. Check Windows printer queue for stuck jobs
-4. Ensure printer driver is installed and printer is online
 
-**SMTP / Email not working**
-- Gmail: Use an App Password (not your Gmail password)
-- Settings → Email → Send Test Email to verify
-- Check port: Gmail uses 587 (TLS) or 465 (SSL)
-
-**App won't activate on new PC**
-Each machine has a unique Machine ID. Generate a new activation key for the new machine using `gen-activation-key.js`.
+### Email / Gmail not working
+- Use an **App Password** (not your Gmail login password)
+- Port 587 for Gmail (TLS), port 465 for SSL
 
 ---
 
-*NovaPOS — Built for Nigerian SMBs*
+## 📋 npm Scripts
+
+```bash
+npm run dev          # Start dev server with hot-reload
+npm run build:win    # Package Windows .exe installer
+npm run build:mac    # Package macOS .dmg
+npm run build:linux  # Package Linux .AppImage
+```
+
+---
+
+*NovaPOS — Built for Nigerian SMBs by Ojuoye Moshood Olawale*
