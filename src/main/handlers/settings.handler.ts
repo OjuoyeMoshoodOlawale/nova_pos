@@ -371,8 +371,7 @@ export function registerSettingsHandlers(db: DB): void {
         `Date   : ${ts}`,
         `Format : Encrypted  (AES-256-GCM)`,
         `Status : Decryption verified ✓`,
-      ].join('
-')
+      ].join('\n')
       logger.info(`[Settings] Decryption verified — ${fileName}`)
     } else {
       // Legacy .db — read raw bytes, no decryption
@@ -382,8 +381,7 @@ export function registerSettingsHandlers(db: DB): void {
         `File   : ${fileName}`,
         `Format : Unencrypted SQLite  (legacy)`,
         `Status : File readable ✓`,
-      ].join('
-')
+      ].join('\n')
     }
 
     // ── Step 3: confirm with native OS dialog ─────────
@@ -400,8 +398,7 @@ export function registerSettingsHandlers(db: DB): void {
         'The application will restart automatically after restoring.',
         '',
         '⚠️  This action cannot be undone.',
-      ].join('
-'),
+      ].join('\n'),
       buttons:   ['Cancel', 'Restore Now'],
       defaultId: 0,   // "Cancel" is the default to prevent accidental clicks
       cancelId:  0,
@@ -445,8 +442,7 @@ export function registerSettingsHandlers(db: DB): void {
         '',
         '⚠️  Make a backup first if you need to keep any data.',
         '⚠️  This CANNOT be undone.',
-      ].join('
-'),
+      ].join('\n'),
       buttons:   ['Cancel — Keep My Data', 'Delete Everything'],
       defaultId: 0,
       cancelId:  0,
