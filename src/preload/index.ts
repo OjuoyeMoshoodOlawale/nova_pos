@@ -45,7 +45,8 @@ const api = {
     // Opens a folder in Windows Explorer / macOS Finder
     openFolder:    (folderPath: string)        => invoke('settings:openFolder', folderPath),
     // Copies DB to timestamped file in backupDir; optionally mirrors to gdriveDir
-    backupLocal:   (opts: { backupDir: string; gdriveDir?: string }) =>
+    // backupDir is system-fixed; users only configure the GDrive sync folder
+    backupLocal:   (opts: { gdriveDir?: string } = {}) =>
                                                   invoke('settings:backupLocal', opts),
   },
 
