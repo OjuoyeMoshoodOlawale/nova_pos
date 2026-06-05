@@ -306,6 +306,31 @@ CREATE TABLE IF NOT EXISTS purchase_price_history (
 
 CREATE INDEX IF NOT EXISTS idx_purchase_history_product ON purchase_price_history(product_id);
 `,
+  '003_price_audit_trail.sql': `
+-- ─── SELLING PRICE HISTORY ────────────────────────────────
+-- Every time a product's selling price or cost price changes,
+-- we log WHO changed it, WHEN, and what the old/new values were.
+-- This is separate from purchase_price_history (buying price).
+-- Past sale_items records are NEVER touched — they already
+-- store a price snapshot at time of sale.
+
+CREATE TABLE IF NOT EXISTS selling_price_history (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id      INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  changed_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  old_cost_price  REAL,
+  new_cost_price  REAL,
+  old_sell_price  REAL,
+  new_sell_price  REAL,
+  old_bulk_price  REAL,
+  new_bulk_price  REAL,
+  reason          TEXT,
+  changed_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_history_product ON selling_price_history(product_id);
+CREATE INDEX IF NOT EXISTS idx_price_history_date    ON selling_price_history(changed_at);
+`,
 }
 
 // ─── Run migrations ───────────────────────────────────

@@ -96,7 +96,11 @@ export function createProduct(db: DB, dto: Partial<Product> & { name: string }):
   return getProductById(db, Number(result.lastInsertRowid))!
 }
 
-export function updateProduct(db: DB, id: number, dto: Record<string, unknown>): Product {
+export function updateProduct(db: DB, id: number, dto: Record<string, unknown>, changedBy?: number): Product {
+  // Snapshot current prices BEFORE changing them
+  const before = db.prepare('SELECT cost_price, selling_price, bulk_selling_price FROM products WHERE id = ?')
+    .get([id]) as { cost_price:number; selling_price:number; bulk_selling_price:number } | undefined
+
   const allowed = [
     'name','sku','barcode','category_id','supplier_id','unit',
     'cost_price','selling_price','stock_qty','reorder_level','description',
@@ -115,6 +119,36 @@ export function updateProduct(db: DB, id: number, dto: Record<string, unknown>):
   }
   vals.push(id)
   db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(vals)
+
+  // Log price changes if any price field changed
+  const newCost  = dto.cost_price     != null ? Number(dto.cost_price)     : before?.cost_price
+  const newSell  = dto.selling_price  != null ? Number(dto.selling_price)  : before?.selling_price
+  const newBulk  = dto.bulk_selling_price != null ? Number(dto.bulk_selling_price) : before?.bulk_selling_price
+
+  const priceChanged =
+    (newCost  != null && before?.cost_price     != null && Math.abs(newCost  - before.cost_price)     > 0.001) ||
+    (newSell  != null && before?.selling_price  != null && Math.abs(newSell  - before.selling_price)  > 0.001) ||
+    (newBulk  != null && before?.bulk_selling_price != null && Math.abs(newBulk - before.bulk_selling_price) > 0.001)
+
+  if (before && priceChanged) {
+    db.prepare(`
+      INSERT INTO selling_price_history
+        (product_id, changed_by, old_cost_price, new_cost_price, old_sell_price, new_sell_price, old_bulk_price, new_bulk_price, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run([
+      id,
+      changedBy ?? null,
+      before.cost_price,
+      newCost ?? before.cost_price,
+      before.selling_price,
+      newSell ?? before.selling_price,
+      before.bulk_selling_price,
+      newBulk ?? before.bulk_selling_price,
+      (dto.reason as string) ?? 'manual_update',
+    ])
+    logger.info(`[ProductService] Price change logged for product #${id}`)
+  }
+
   return getProductById(db, id)!
 }
 

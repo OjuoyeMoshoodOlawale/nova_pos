@@ -39,4 +39,16 @@ export function registerProductHandlers(db: DB): void {
     receiveStock(getDb(), input)
   })
 
+
+  safeHandle('products:priceChangeHistory', (_e, productId: number) => {
+    return db.prepare(`
+      SELECT h.*, u.full_name AS changer_name, p.name AS product_name
+      FROM selling_price_history h
+      LEFT JOIN users u ON h.changed_by = u.id
+      JOIN products p ON h.product_id = p.id
+      WHERE h.product_id = ?
+      ORDER BY h.changed_at DESC LIMIT 50
+    `).all([productId])
+  })
+
 }

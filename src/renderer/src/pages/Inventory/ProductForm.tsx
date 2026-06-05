@@ -34,7 +34,8 @@ export default function ProductForm({product, categories, onClose, onSaved}: Pro
   })
   const [saving, setSaving] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [priceHistory, setPriceHistory] = useState<any[]|null>(null)
+  const [priceHistory,       setPriceHistory]       = useState<any[]|null>(null)
+  const [priceChangeHistory, setPriceChangeHistory] = useState<any[]|null>(null)
 
   const set = (k: string, v: unknown) => setD(p => ({...p, [k]: v}))
 
@@ -56,8 +57,12 @@ export default function ProductForm({product, categories, onClose, onSaved}: Pro
 
   async function loadHistory() {
     if (!product) return
-    const r = await window.api.products.priceHistory(product.id)
-    if (r.success) setPriceHistory(r.data)
+    const [ph, pch] = await Promise.all([
+      window.api.products.priceHistory(product.id),
+      window.api.products.priceChangeHistory(product.id),
+    ])
+    if (ph.success)  setPriceHistory(ph.data)
+    if (pch.success) setPriceChangeHistory(pch.data)
   }
 
   async function save() {
@@ -221,17 +226,67 @@ export default function ProductForm({product, categories, onClose, onSaved}: Pro
           )}
 
           {/* Price History panel */}
-          {priceHistory !== null && (
-            <div className="border border-slate-100 rounded-xl p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Purchase Price History</h3>
-              {priceHistory.length === 0
-                ? <p className="text-sm text-slate-400 text-center py-4">No purchase history yet.</p>
-                : <table className="w-full text-sm"><thead><tr className="border-b border-slate-100"><th className="pb-2 text-left text-xs text-slate-500">Date</th><th className="pb-2 text-left text-xs text-slate-500">Cost</th><th className="pb-2 text-left text-xs text-slate-500">Mode</th><th className="pb-2 text-left text-xs text-slate-500">Qty</th><th className="pb-2 text-left text-xs text-slate-500">By</th></tr></thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {priceHistory.map((h:any)=>(
-                      <tr key={h.id}><td className="py-2 text-slate-500 text-xs">{new Date(h.recorded_at).toLocaleDateString()}</td><td className="py-2 font-medium">{sym}{h.cost_price.toFixed(2)}</td><td className="py-2"><span className="badge bg-slate-100 text-slate-600 text-xs">{h.sell_unit}</span></td><td className="py-2 text-slate-500">{h.qty_bought||'—'}</td><td className="py-2 text-slate-500 text-xs">{h.recorder_name||'—'}</td></tr>
-                    ))}
-                  </tbody></table>}
+          {(priceHistory !== null || priceChangeHistory !== null) && (
+            <div className="border border-slate-100 rounded-xl overflow-hidden">
+              <div className="flex border-b border-slate-100">
+                <button onClick={()=>{setPriceHistory(p=>p??[]); setPriceChangeHistory(null)}}
+                  className={`flex-1 py-2.5 text-xs font-medium transition ${priceHistory!==null&&priceChangeHistory===null?'bg-blue-50 text-blue-700 border-b-2 border-blue-600':'text-slate-500 hover:text-slate-700'}`}>
+                  📦 Purchase History
+                </button>
+                <button onClick={()=>{setPriceChangeHistory(p=>p??[]); setPriceHistory(null)}}
+                  className={`flex-1 py-2.5 text-xs font-medium transition ${priceChangeHistory!==null?'bg-blue-50 text-blue-700 border-b-2 border-blue-600':'text-slate-500 hover:text-slate-700'}`}>
+                  💰 Price Changes
+                </button>
+              </div>
+              <div className="p-4">
+                <div className="bg-green-50 border border-green-100 rounded-lg p-2 mb-3 text-xs text-green-700">
+                  ✅ Price changes never affect past sales — each sale permanently stores the price at time of purchase.
+                </div>
+                {priceHistory !== null && (
+                  priceHistory.length === 0
+                    ? <p className="text-sm text-slate-400 text-center py-4">No purchase history yet.</p>
+                    : <table className="w-full text-sm"><thead><tr className="border-b border-slate-100"><th className="pb-2 text-left text-xs text-slate-500">Date</th><th className="pb-2 text-left text-xs text-slate-500">Cost</th><th className="pb-2 text-left text-xs text-slate-500">Mode</th><th className="pb-2 text-left text-xs text-slate-500">Qty</th><th className="pb-2 text-left text-xs text-slate-500">By</th></tr></thead>
+                        <tbody className="divide-y divide-slate-50">{priceHistory.map((h:any)=><tr key={h.id}><td className="py-1.5 text-xs text-slate-500">{new Date(h.recorded_at).toLocaleDateString()}</td><td className="py-1.5 font-medium">{sym}{h.cost_price.toFixed(2)}</td><td className="py-1.5"><span className="badge bg-slate-100 text-slate-600 text-xs">{h.sell_unit}</span></td><td className="py-1.5 text-xs text-slate-500">{h.qty_bought||'—'}</td><td className="py-1.5 text-xs text-slate-500">{h.recorder_name||'—'}</td></tr>)}</tbody>
+                      </table>
+                )}
+                {priceChangeHistory !== null && (
+                  priceChangeHistory.length === 0
+                    ? <p className="text-sm text-slate-400 text-center py-4">No price changes recorded yet.</p>
+                    : <table className="w-full text-xs"><thead><tr className="border-b border-slate-100">
+                        <th className="pb-2 text-left text-slate-500">Date</th>
+                        <th className="pb-2 text-left text-slate-500">Cost</th>
+                        <th className="pb-2 text-left text-slate-500">Sell Price</th>
+                        <th className="pb-2 text-left text-slate-500">By</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {priceChangeHistory.map((h:any)=>(
+                          <tr key={h.id}>
+                            <td className="py-1.5 text-slate-500">{new Date(h.changed_at).toLocaleDateString()}</td>
+                            <td className="py-1.5">
+                              {h.old_cost_price?.toFixed(2) !== h.new_cost_price?.toFixed(2) && (
+                                <span>
+                                  <span className="line-through text-slate-400">{sym}{h.old_cost_price?.toFixed(2)}</span>
+                                  {' → '}
+                                  <span className="font-medium text-slate-700">{sym}{h.new_cost_price?.toFixed(2)}</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1.5">
+                              {h.old_sell_price?.toFixed(2) !== h.new_sell_price?.toFixed(2) && (
+                                <span>
+                                  <span className="line-through text-slate-400">{sym}{h.old_sell_price?.toFixed(2)}</span>
+                                  {' → '}
+                                  <span className="font-medium text-blue-600">{sym}{h.new_sell_price?.toFixed(2)}</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-1.5 text-slate-500">{h.changer_name||'—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                )}
+              </div>
             </div>
           )}
 
