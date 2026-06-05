@@ -1,5 +1,5 @@
 // src/renderer/src/pages/POS/POSPage.tsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useCartStore }   from '../../store/cartStore'
 import { useAppStore }    from '../../store/appStore'
 import { Product, Category, CartItem } from '@shared/types'
@@ -7,7 +7,6 @@ import CheckoutBar        from './CheckoutBar'
 import PaymentModal       from './PaymentModal'
 import HoldOrderModal     from './HoldOrderModal'
 import CustomerSearch     from './CustomerSearch'
-import { useBarcodeScanner } from './BarcodeScanner'
 import {
   ShoppingCart, X, Plus, Minus, Trash2, Tag,
   Pause, Zap, Package, Grid,
@@ -116,19 +115,6 @@ export default function POSPage() {
     }
     load()
   }, [])
-
-  // Hardware barcode scanner (USB keyboard wedge)
-  const handleScan = useCallback(async (code: string) => {
-    const r = await window.api.products.findBarcode(code)
-    if (r.success && r.data) {
-      cart.addItem(r.data, 'unit')
-      setFlashId(r.data.id)
-      setTimeout(() => setFlashId(null), 800)
-    } else {
-      addToast('error', `Barcode not found: ${code}`)
-    }
-  }, [cart, addToast])
-  useBarcodeScanner(handleScan)
 
   function handleAddProduct(product: Product, mode: 'unit'|'bulk') {
     cart.addItem(product, mode)

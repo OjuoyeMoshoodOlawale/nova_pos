@@ -35,6 +35,7 @@ export default function StockReceiveModal({ product: initialProduct, onClose, on
   const [unitSellPrice, setUnitSellPrice] = useState(0)
   const [bulkSellPrice, setBulkSellPrice] = useState(0)
   const [updatePrices,  setUpdatePrices]  = useState(true)
+  const [priceStrategy, setPriceStrategy] = useState<'keep'|'update'|'average'>('update')
 
   // ── Derived calculations ──────────────────────────────
   const totalUnitsReceived = buyMode === 'bulk'
@@ -257,7 +258,57 @@ export default function StockReceiveModal({ product: initialProduct, onClose, on
               </div>
             )}
 
-            {/* ── Selling prices ────────────────────────────────── */}
+            {/* ── Price strategy when cost changes ───────────────── */}
+            {product && calcCostPerUnit > 0 && Math.abs(calcCostPerUnit - product.cost_price) > 0.01 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-amber-800">
+                  💰 Cost Change Detected
+                </p>
+                <div className="flex gap-4 text-sm">
+                  <div><p className="text-xs text-amber-600">Previous cost</p><p className="font-bold text-slate-700">{sym}{product.cost_price.toFixed(2)}/{product.unit}</p></div>
+                  <div className="text-amber-400">→</div>
+                  <div><p className="text-xs text-amber-600">New cost</p><p className="font-bold text-slate-700">{sym}{calcCostPerUnit.toFixed(2)}/{product.unit}</p>
+                    <p className={`text-xs font-medium ${calcCostPerUnit > product.cost_price ? 'text-red-600' : 'text-green-600'}`}>
+                      {calcCostPerUnit > product.cost_price ? '▲' : '▼'}
+                      {Math.abs(((calcCostPerUnit - product.cost_price) / product.cost_price) * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-2 text-xs text-blue-700">
+                  ℹ️ Your past sales reports are <strong>not affected</strong>. Previous sales already recorded the price at time of sale.
+                  This only affects future sales.
+                </div>
+                <p className="text-xs font-medium text-amber-700">How do you want to price new stock?</p>
+                <div className="space-y-2">
+                  {([
+                    ['keep', `Keep current selling price (${sym}${product.selling_price.toFixed(2)}/${product.unit})`, `Customers pay the same. Your profit margin on new stock changes.`],
+                    ['update', 'Set new selling price manually', 'You decide the price below. Recommended when cost changes significantly.'],
+                    ['average', `Use weighted average cost (${sym}${(((product.cost_price * product.stock_qty) + (calcCostPerUnit * totalUnitsReceived)) / Math.max(product.stock_qty + totalUnitsReceived, 1)).toFixed(2)}/${product.unit})`, 'Blends old and new cost. Good for gradual price changes.'],
+                  ] as const).map(([v, label, hint]) => (
+                    <label key={v} className="flex items-start gap-3 cursor-pointer">
+                      <input type="radio" name="priceStrategy" value={v}
+                        checked={priceStrategy===v}
+                        onChange={()=>{
+                          setPriceStrategy(v)
+                          if(v==='keep') { setUpdatePrices(false) }
+                          else if(v==='average') {
+                            const avgCost = ((product.cost_price * product.stock_qty) + (calcCostPerUnit * totalUnitsReceived)) / Math.max(product.stock_qty + totalUnitsReceived, 1)
+                            setUnitSellPrice(+(avgCost * 1.25).toFixed(2))
+                            setUpdatePrices(true)
+                          } else { setUpdatePrices(true) }
+                        }}
+                        className="mt-0.5 flex-shrink-0"/>
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">{label}</p>
+                        <p className="text-xs text-slate-400">{hint}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+    {/* ── Selling prices ────────────────────────────────── */}
             <div>
               <label className="flex items-center gap-3 cursor-pointer mb-3">
                 <input type="checkbox" checked={updatePrices} onChange={e=>setUpdatePrices(e.target.checked)}/>
