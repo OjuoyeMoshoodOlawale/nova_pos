@@ -266,36 +266,141 @@ export function registerSettingsHandlers(db: DB): void {
   })
 
   // ── Restore (handles .novaenc AND legacy .db) ─────────
+  // SAFETY FLOW (nothing written until user confirms):
+  //
+  //  Step 1  Pick file via OS dialog
+  //  Step 2  Read + decrypt to memory  ← ZERO disk writes here
+  //          → if decrypt fails, error shown, live DB untouched
+  //  Step 3  Show OS confirmation dialog:
+  //          "Backup from [date] · Decryption ✓ · Replace all data?"
+  //  Step 4  User clicks "Restore Now" → write plain SQLite → restart
+  //          User clicks "Cancel"      → live DB untouched, returns null
   safeHandle(CH.SETTINGS_RESTORE, async () => {
-    const result = await dialog.showOpenDialog({
-      title:   'Restore NovaPOS Backup',
+    // ── Step 1: pick file ─────────────────────────────
+    const pick = await dialog.showOpenDialog({
+      title:      'Select NovaPOS Backup to Restore',
       filters: [
-        { name: 'NovaPOS Encrypted Backup',  extensions: ['novaenc'] },
-        { name: 'SQLite Database (legacy unencrypted)', extensions: ['db'] },
+        { name: 'NovaPOS Encrypted Backup (.novaenc)',  extensions: ['novaenc'] },
+        { name: 'Legacy SQLite Database (.db)',          extensions: ['db']       },
       ],
       properties: ['openFile'],
     })
-    if (result.canceled || !result.filePaths[0]) return null
+    if (pick.canceled || !pick.filePaths[0]) return null
 
-    const selectedFile = result.filePaths[0]
+    const selectedFile = pick.filePaths[0]
+    const fileName     = path.basename(selectedFile)
+    const isEncrypted  = fileName.toLowerCase().endsWith('.novaenc')
     let plaintext: Buffer
+    let infoLines: string
 
-    if (selectedFile.toLowerCase().endsWith('.novaenc')) {
-      // Decrypt with this installation's key
+    // ── Step 2: decrypt to memory — NO DISK WRITES ───
+    if (isEncrypted) {
+      logger.info(`[Settings] Verifying backup: ${fileName}`)
       const key  = deriveBackupKey(db)
       const blob = fs.readFileSync(selectedFile)
-      // May throw with a user-readable error message
+
+      // decryptBackup() throws with a clear user-readable message if:
+      //   · wrong magic bytes  (not a novaenc file)
+      //   · auth tag mismatch  (wrong key / file corrupted)
+      // safeHandle catches the throw → { success:false, error } returned
+      // to the renderer.  The live DB is NEVER touched.
       plaintext = decryptBackup(blob, key)
+
+      // Parse date from filename  e.g. novapos-backup-2026-06-05T22-00-00.novaenc
+      const m  = fileName.match(/backup-(\d{4}-\d{2}-\d{2}T[\d-]+)/)
+      const ts = m ? m[1].replace(/T/, ' ').replace(/-(\d{2})-(\d{2})$/, ':$1:$2') : 'unknown date'
+      infoLines = [
+        `File   : ${fileName}`,
+        `Date   : ${ts}`,
+        `Format : Encrypted  (AES-256-GCM)`,
+        `Status : Decryption verified ✓`,
+      ].join('
+')
+      logger.info(`[Settings] Decryption verified — ${fileName}`)
     } else {
-      // Legacy unencrypted .db — restore directly
-      logger.warn('[Settings] Restoring legacy unencrypted backup')
+      // Legacy .db — read raw bytes, no decryption
+      logger.warn(`[Settings] Restoring legacy unencrypted backup: ${fileName}`)
       plaintext = fs.readFileSync(selectedFile)
+      infoLines = [
+        `File   : ${fileName}`,
+        `Format : Unencrypted SQLite  (legacy)`,
+        `Status : File readable ✓`,
+      ].join('
+')
     }
 
-    // Replace the live DB
+    // ── Step 3: confirm with native OS dialog ─────────
+    // Decryption succeeded — now we can tell the user the exact
+    // backup they are about to restore and get explicit confirmation.
+    const { response } = await dialog.showMessageBox({
+      type:      'warning',
+      title:     'Confirm Database Restore',
+      message:   'Replace current data with this backup?',
+      detail:    [
+        infoLines,
+        '',
+        'This will replace ALL current sales, products, and settings.',
+        'The application will restart automatically after restoring.',
+        '',
+        '⚠️  This action cannot be undone.',
+      ].join('
+'),
+      buttons:   ['Cancel', 'Restore Now'],
+      defaultId: 0,   // "Cancel" is the default to prevent accidental clicks
+      cancelId:  0,
+    })
+
+    if (response === 0) {
+      logger.info('[Settings] Restore cancelled by user')
+      return null     // cancelled — live DB still untouched
+    }
+
+    // ── Step 4: write plain SQLite, then restart ──────
+    // Only reached when: decryption ✓ + user clicked "Restore Now"
     db.close()
     fs.writeFileSync(getDbPath(), plaintext)
-    logger.warn('[Settings] Database restored — restarting app')
+    logger.warn(`[Settings] Database restored from ${fileName} — restarting`)
+    app.relaunch()
+    app.exit(0)
+  })
+
+  // ── Reset / delete database (fresh start) ────────────
+  // Closes and DELETES the live .db file.  The app restarts and
+  // runMigrations() creates a brand-new empty database.
+  // Restricted: caller must supply the word "RESET" as confirmation.
+  safeHandle('settings:resetDatabase', async (_e, confirm: string) => {
+    if (confirm !== 'RESET') {
+      throw new Error('Confirmation token required — pass the string "RESET".')
+    }
+
+    const { response } = await dialog.showMessageBox({
+      type:      'warning',
+      title:     'Delete All Data?',
+      message:   'This will permanently delete the entire database.',
+      detail:    [
+        'ALL data will be lost:',
+        '  • Every sale, receipt, and payment',
+        '  • All products, stock levels, and prices',
+        '  • All customers, suppliers, and staff',
+        '  • All settings and business profile',
+        '',
+        'The application will restart with a completely empty database.',
+        '',
+        '⚠️  Make a backup first if you need to keep any data.',
+        '⚠️  This CANNOT be undone.',
+      ].join('
+'),
+      buttons:   ['Cancel — Keep My Data', 'Delete Everything'],
+      defaultId: 0,
+      cancelId:  0,
+    })
+
+    if (response === 0) return null
+
+    const dbPath = getDbPath()
+    db.close()
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
+    logger.warn('[Settings] Database deleted — restarting with fresh DB')
     app.relaunch()
     app.exit(0)
   })
