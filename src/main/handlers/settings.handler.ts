@@ -322,23 +322,24 @@ export function registerSettingsHandlers(db: DB): void {
     return result.filePath
   })
 
-  // ── Restore (handles .novaenc AND legacy .db) ─────────
-  // SAFETY FLOW (nothing written until user confirms):
+  // ── Restore (handles .novaenc, legacy .db, and .db.gz) ──
+  // SAFETY FLOW — nothing written until user explicitly confirms:
   //
-  //  Step 1  Pick file via OS dialog
-  //  Step 2  Read + decrypt to memory  ← ZERO disk writes here
-  //          → if decrypt fails, error shown, live DB untouched
-  //  Step 3  Show OS confirmation dialog:
-  //          "Backup from [date] · Decryption ✓ · Replace all data?"
+  //  Step 1  Pick file (.novaenc / .db / .db.gz)
+  //  Step 2  Decode/decrypt to memory (ZERO disk writes)
+  //          Validate SQLite magic bytes — reject garbage before overwriting
+  //  Step 3  Show native OS confirmation with backup info + "decoded ✓"
   //  Step 4  User clicks "Restore Now" → write plain SQLite → restart
-  //          User clicks "Cancel"      → live DB untouched, returns null
+  //          User clicks "Cancel"      → nothing touched
   safeHandle(CH.SETTINGS_RESTORE, async () => {
     // ── Step 1: pick file ─────────────────────────────
     const pick = await dialog.showOpenDialog({
-      title:      'Select NovaPOS Backup to Restore',
+      title: 'Select NovaPOS Backup to Restore',
       filters: [
-        { name: 'NovaPOS Encrypted Backup (.novaenc)',  extensions: ['novaenc'] },
-        { name: 'Legacy SQLite Database (.db)',          extensions: ['db']       },
+        { name: 'NovaPOS Encrypted Backup',    extensions: ['novaenc'] },
+        { name: 'Legacy SQLite Database',       extensions: ['db']      },
+        { name: 'Legacy Compressed Backup',     extensions: ['db.gz', 'gz'] },
+        { name: 'All Backup Files',             extensions: ['novaenc', 'db', 'gz'] },
       ],
       properties: ['openFile'],
     })
@@ -346,47 +347,73 @@ export function registerSettingsHandlers(db: DB): void {
 
     const selectedFile = pick.filePaths[0]
     const fileName     = path.basename(selectedFile)
-    const isEncrypted  = fileName.toLowerCase().endsWith('.novaenc')
-    let plaintext: Buffer
-    let infoLines: string
+    const lowerName    = fileName.toLowerCase()
+    let   plaintext: Buffer
+    let   formatLabel: string
 
-    // ── Step 2: decrypt to memory — NO DISK WRITES ───
-    if (isEncrypted) {
-      logger.info(`[Settings] Verifying backup: ${fileName}`)
+    // ── Step 2: decode/decrypt to memory ─────────────
+    if (lowerName.endsWith('.novaenc')) {
+      // AES-256-GCM encrypted backup
+      logger.info(`[Settings] Decrypting backup: ${fileName}`)
       const key  = deriveBackupKey(db)
       const blob = fs.readFileSync(selectedFile)
+      plaintext  = decryptBackup(blob, key)   // throws with clear message if wrong key/corrupt
+      formatLabel = 'Encrypted (AES-256-GCM) — decryption verified ✓'
 
-      // decryptBackup() throws with a clear user-readable message if:
-      //   · wrong magic bytes  (not a novaenc file)
-      //   · auth tag mismatch  (wrong key / file corrupted)
-      // safeHandle catches the throw → { success:false, error } returned
-      // to the renderer.  The live DB is NEVER touched.
-      plaintext = decryptBackup(blob, key)
+    } else if (lowerName.endsWith('.db.gz') || lowerName.endsWith('.gz')) {
+      // Legacy gzip-compressed backup (old format)
+      logger.info(`[Settings] Decompressing legacy .gz backup: ${fileName}`)
+      const gzipped = fs.readFileSync(selectedFile)
+      plaintext = await new Promise<Buffer>((resolve, reject) => {
+        const zlib = require('node:zlib')
+        zlib.gunzip(gzipped, (err: Error | null, result: Buffer) =>
+          err ? reject(new Error(`Decompression failed: ${err.message}`)) : resolve(result)
+        )
+      })
+      formatLabel = 'Legacy compressed (.db.gz) — decompressed ✓'
 
-      // Parse date from filename  e.g. novapos-backup-2026-06-05T22-00-00.novaenc
-      const m  = fileName.match(/backup-(\d{4}-\d{2}-\d{2}T[\d-]+)/)
-      const ts = m ? m[1].replace(/T/, ' ').replace(/-(\d{2})-(\d{2})$/, ':$1:$2') : 'unknown date'
-      infoLines = [
-        `File   : ${fileName}`,
-        `Date   : ${ts}`,
-        `Format : Encrypted  (AES-256-GCM)`,
-        `Status : Decryption verified ✓`,
-      ].join('\n')
-      logger.info(`[Settings] Decryption verified — ${fileName}`)
     } else {
-      // Legacy .db — read raw bytes, no decryption
+      // Unencrypted .db file (legacy)
       logger.warn(`[Settings] Restoring legacy unencrypted backup: ${fileName}`)
-      plaintext = fs.readFileSync(selectedFile)
-      infoLines = [
-        `File   : ${fileName}`,
-        `Format : Unencrypted SQLite  (legacy)`,
-        `Status : File readable ✓`,
-      ].join('\n')
+      plaintext   = fs.readFileSync(selectedFile)
+      formatLabel = 'Legacy unencrypted SQLite (.db)'
     }
 
+    // ── Validate SQLite magic bytes ───────────────────
+    // "SQLite format 3\0" are the first 16 bytes of every valid SQLite file.
+    // If plaintext doesn't start with this, we have the wrong content
+    // (wrong key, wrong file, failed decompression) — reject BEFORE
+    // any disk write so the live database is completely untouched.
+    const SQLITE_MAGIC = Buffer.from('53514c69746520666f726d617420330', 'hex')
+    if (plaintext.length < 100) {
+      throw new Error(
+        `Invalid backup content — file is too small (${plaintext.length} bytes). ` +
+        'The file may be empty or corrupt.'
+      )
+    }
+    if (!plaintext.slice(0, 15).equals(SQLITE_MAGIC)) {
+      throw new Error(
+        'Invalid backup — content is not a valid SQLite database.\n' +
+        'Possible causes:\n' +
+        '  • Wrong file selected\n' +
+        '  • Backup was created on a different installation (wrong encryption key)\n' +
+        '  • File is corrupted\n' +
+        'To restore on a new machine, activate with the same licence key first.'
+      )
+    }
+
+    // Extract backup date from filename  e.g. novapos-backup-2026-06-05_22-00.novaenc
+    const m  = fileName.match(/(\d{4}-\d{2}-\d{2}[_T][\d:-]+)/)
+    const ts = m ? m[1].replace(/_/g, ' ').replace(/-/g, ':').replace('T', ' ') : 'unknown date'
+
+    const infoLines = [
+      `File    : ${fileName}`,
+      `Date    : ${ts}`,
+      `Format  : ${formatLabel}`,
+      `DB size : ${(plaintext.length / 1024 / 1024).toFixed(2)} MB`,
+    ].join('\n')
+
     // ── Step 3: confirm with native OS dialog ─────────
-    // Decryption succeeded — now we can tell the user the exact
-    // backup they are about to restore and get explicit confirmation.
     const { response } = await dialog.showMessageBox({
       type:      'warning',
       title:     'Confirm Database Restore',
@@ -394,70 +421,43 @@ export function registerSettingsHandlers(db: DB): void {
       detail:    [
         infoLines,
         '',
-        'This will replace ALL current sales, products, and settings.',
-        'The application will restart automatically after restoring.',
+        'This will replace ALL current sales, products, customers, and settings.',
+        'The application will restart automatically.',
         '',
-        '⚠️  This action cannot be undone.',
+        'WARNING: This cannot be undone. Back up your current data first if needed.',
       ].join('\n'),
       buttons:   ['Cancel', 'Restore Now'],
-      defaultId: 0,   // "Cancel" is the default to prevent accidental clicks
-      cancelId:  0,
-    })
-
-    if (response === 0) {
-      logger.info('[Settings] Restore cancelled by user')
-      return null     // cancelled — live DB still untouched
-    }
-
-    // ── Step 4: write plain SQLite, then restart ──────
-    // Only reached when: decryption ✓ + user clicked "Restore Now"
-    db.close()
-    fs.writeFileSync(getDbPath(), plaintext)
-    logger.warn(`[Settings] Database restored from ${fileName} — restarting`)
-    app.relaunch()
-    app.exit(0)
-  })
-
-  // ── Reset / delete database (fresh start) ────────────
-  // Closes and DELETES the live .db file.  The app restarts and
-  // runMigrations() creates a brand-new empty database.
-  // Restricted: caller must supply the word "RESET" as confirmation.
-  safeHandle('settings:resetDatabase', async (_e, confirm: string) => {
-    if (confirm !== 'RESET') {
-      throw new Error('Confirmation token required — pass the string "RESET".')
-    }
-
-    const { response } = await dialog.showMessageBox({
-      type:      'warning',
-      title:     'Delete All Data?',
-      message:   'This will permanently delete the entire database.',
-      detail:    [
-        'ALL data will be lost:',
-        '  • Every sale, receipt, and payment',
-        '  • All products, stock levels, and prices',
-        '  • All customers, suppliers, and staff',
-        '  • All settings and business profile',
-        '',
-        'The application will restart with a completely empty database.',
-        '',
-        '⚠️  Make a backup first if you need to keep any data.',
-        '⚠️  This CANNOT be undone.',
-      ].join('\n'),
-      buttons:   ['Cancel — Keep My Data', 'Delete Everything'],
       defaultId: 0,
       cancelId:  0,
     })
+    if (response === 0) {
+      logger.info('[Settings] Restore cancelled by user')
+      return null
+    }
 
-    if (response === 0) return null
-
-    const dbPath = getDbPath()
+    // ── Step 4: write validated SQLite to disk then restart ─
+    // Only reached when:
+    //  • decryption/decompression succeeded
+    //  • SQLite magic bytes validated
+    //  • user clicked "Restore Now"
+    const targetPath = getDbPath()
+    logger.warn(`[Settings] Writing restored DB (${plaintext.length} bytes) to: ${targetPath}`)
     db.close()
-    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
-    logger.warn('[Settings] Database deleted — restarting with fresh DB')
+    fs.writeFileSync(targetPath, plaintext)
+
+    // Verify write completed correctly
+    const written = fs.statSync(targetPath).size
+    if (written !== plaintext.length) {
+      throw new Error(
+        `Restore write incomplete — expected ${plaintext.length} bytes, got ${written}. ` +
+        'Check disk space and try again.'
+      )
+    }
+
+    logger.warn(`[Settings] Restore complete (${written} bytes) — restarting`)
     app.relaunch()
     app.exit(0)
   })
-
   // ── Email test ────────────────────────────────────────
   safeHandle(CH.SETTINGS_TEST_EMAIL, async (_e, config) => { await testEmail(config) })
 
