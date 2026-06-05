@@ -157,16 +157,21 @@ export function archiveProduct(db: DB, id: number): void {
 }
 
 // ─── Receive stock (purchase receipt) ────────────────────
+export type PriceMode = 'keep' | 'switch_now' | 'auto_switch'
+
 export interface StockReceiveInput {
   product_id:     number
   buy_mode:       'unit' | 'bulk'
-  qty_received:   number        // units OR bulks depending on buy_mode
-  cost_per_unit:  number        // calculated cost per retail unit
+  qty_received:   number        // total RETAIL units
+  cost_per_unit:  number        // cost per retail unit
   total_cost:     number
   supplier_id?:   number
   notes?:         string
-  new_selling_price?:       number
-  new_bulk_selling_price?:  number
+  // Pricing mode
+  price_mode:               PriceMode
+  new_selling_price?:       number    // new unit sell price
+  new_bulk_selling_price?:  number    // new bulk sell price
+  switch_at_qty?:           number    // for auto_switch: the threshold qty
   recorded_by:    number
 }
 
@@ -181,20 +186,29 @@ export function receiveStock(db: DB, input: StockReceiveInput): void {
 
     const newQty = prod.stock_qty + unitQty
 
-    // Update stock + cost price + optional selling price
+    // Build update based on pricing mode
     const updates: string[]  = [`stock_qty = ?`, `cost_price = ?`, `updated_at = datetime('now')`]
     const vals:    unknown[] = [newQty, input.cost_per_unit]
 
-    if (input.new_selling_price != null) {
-      updates.push('selling_price = ?')
-      vals.push(input.new_selling_price)
+    if (input.price_mode === 'switch_now') {
+      // Switch price immediately — all stock (old + new) uses new price
+      if (input.new_selling_price != null)      { updates.push('selling_price = ?');       vals.push(input.new_selling_price) }
+      if (input.new_bulk_selling_price != null)  { updates.push('bulk_selling_price = ?');  vals.push(input.new_bulk_selling_price) }
+      // Clear any pending switch
+      updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
+    } else if (input.price_mode === 'auto_switch') {
+      // Keep selling at current price until old stock runs out,
+      // then auto-switch to new price at the next sale
+      updates.push('pending_sell_price = ?', 'pending_bulk_price = ?', 'price_switch_at_qty = ?')
+      vals.push(
+        input.new_selling_price ?? null,
+        input.new_bulk_selling_price ?? null,
+        input.switch_at_qty ?? input.qty_received, // switch when stock <= new stock qty
+      )
     }
-    if (input.new_bulk_selling_price != null) {
-      updates.push('bulk_selling_price = ?')
-      vals.push(input.new_bulk_selling_price)
-    }
-    vals.push(input.product_id)
+    // 'keep' mode: only update stock and cost, no price changes
 
+    vals.push(input.product_id)
     db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals)
 
     // Stock adjustment record

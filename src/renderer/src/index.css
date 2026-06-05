@@ -10,3 +10,5 @@
   .card { @apply bg-white rounded-xl shadow-sm border border-slate-100 p-6; }
   .badge { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; }
 }
+
+.step-label { @apply text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block; }

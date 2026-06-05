@@ -331,6 +331,14 @@ CREATE TABLE IF NOT EXISTS selling_price_history (
 CREATE INDEX IF NOT EXISTS idx_price_history_product ON selling_price_history(product_id);
 CREATE INDEX IF NOT EXISTS idx_price_history_date    ON selling_price_history(changed_at);
 `,
+  '004_pending_price_switch.sql': `
+-- When new stock arrives at a different cost, the shop can choose:
+-- A) keep current price  B) switch now  C) auto-switch when old stock runs out
+-- Option C uses these fields:
+ALTER TABLE products ADD COLUMN pending_sell_price  REAL;     -- future unit price
+ALTER TABLE products ADD COLUMN pending_bulk_price  REAL;     -- future bulk price
+ALTER TABLE products ADD COLUMN price_switch_at_qty REAL;     -- switch when stock <= this
+`,
 }
 
 // ─── Run migrations ───────────────────────────────────
