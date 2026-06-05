@@ -70,6 +70,12 @@ export default function StockReceiveModal({product: initProduct, onClose, onSave
 
   const totalUnits    = buyMode === 'bulk' ? qtyBought * unitsPerBulk : qtyBought
   const totalSpend    = qtyBought * buyingCost
+
+  // Weighted Average Cost calculation
+  const existingValue  = (product?.stock_qty ?? 0) * (product?.cost_price ?? 0)
+  const newValue       = totalUnits * costPerUnit
+  const totalQty       = (product?.stock_qty ?? 0) + totalUnits
+  const weightedAvgCost = totalQty > 0 ? (existingValue + newValue) / totalQty : costPerUnit
   const prevCost      = product?.cost_price ?? 0
   const costChanged   = prevCost > 0 && costPerUnit > 0 && Math.abs(costPerUnit - prevCost) > 0.01
   const costUp        = costPerUnit > prevCost
@@ -259,18 +265,40 @@ export default function StockReceiveModal({product: initProduct, onClose, onSave
 
                 {/* Summary row */}
                 {qtyBought > 0 && buyingCost > 0 && (
-                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200">
-                    {[
-                      {l:`Total ${product.unit}s`, v:totalUnits.toLocaleString()},
-                      {l:`Cost/${product.unit}`,   v:`${sym}${costPerUnit.toFixed(2)}`},
-                      {l:'Total spend',             v:`${sym}${totalSpend.toLocaleString('en',{minimumFractionDigits:2})}`},
-                    ].map(s=>(
-                      <div key={s.l} className="bg-white rounded-lg p-2.5 text-center border border-slate-100">
-                        <p className="text-sm font-bold text-slate-800">{s.v}</p>
-                        <p className="text-xs text-slate-400">{s.l}</p>
+                  <>
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-200">
+                      {[
+                        {l:`Total ${product.unit}s`, v:totalUnits.toLocaleString()},
+                        {l:`Cost/${product.unit}`,   v:`${sym}${costPerUnit.toFixed(2)}`},
+                        {l:'Total spend',             v:`${sym}${totalSpend.toLocaleString('en',{minimumFractionDigits:2})}`},
+                      ].map(s=>(
+                        <div key={s.l} className="bg-white rounded-lg p-2.5 text-center border border-slate-100">
+                          <p className="text-sm font-bold text-slate-800">{s.v}</p>
+                          <p className="text-xs text-slate-400">{s.l}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {product.stock_qty > 0 && Math.abs(costPerUnit - (product.cost_price??0)) > 0.01 && (
+                      <div className="bg-purple-50 border border-purple-100 rounded-lg p-3 text-xs">
+                        <p className="font-semibold text-purple-800 mb-1">📊 Weighted Average Cost (WAC)</p>
+                        <div className="grid grid-cols-3 gap-2 text-purple-700">
+                          <div>
+                            <p className="text-purple-500">Existing stock</p>
+                            <p className="font-medium">{product.stock_qty} × {sym}{(product.cost_price??0).toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-purple-500">New stock</p>
+                            <p className="font-medium">{totalUnits} × {sym}{costPerUnit.toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-purple-500">Avg cost</p>
+                            <p className="font-bold text-purple-900">{sym}{weightedAvgCost.toFixed(2)}</p>
+                          </div>
+                        </div>
+                        <p className="text-purple-500 mt-1">Use WAC as your new cost basis? Select "Switch now" and enter {sym}{weightedAvgCost.toFixed(2)} below.</p>
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 )}
 
                 {/* Cost change alert */}

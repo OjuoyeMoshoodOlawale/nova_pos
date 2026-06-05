@@ -4,11 +4,30 @@ import { safeHandle } from '../utils/safeHandle'
 import { CH } from '@shared/ipcChannels'
 
 export function registerCustomerHandlers(db: DB): void {
-  safeHandle(CH.CUSTOMER_ALL,    () => db.prepare('SELECT * FROM customers WHERE is_active=1 ORDER BY full_name').all())
+  safeHandle(CH.CUSTOMER_ALL, () => db.prepare(`
+    SELECT c.*, cpg.name AS price_group_name, cpg.discount_pct AS group_discount
+    FROM customers c
+    LEFT JOIN customer_price_groups cpg ON c.price_group_id = cpg.id
+    WHERE c.is_active=1 ORDER BY c.full_name
+  `).all())
 
   safeHandle(CH.CUSTOMER_SEARCH, (_e, q: string) => {
     const like = `%${q}%`
-    return db.prepare('SELECT * FROM customers WHERE is_active=1 AND (full_name LIKE ? OR phone LIKE ?) LIMIT 20').all([like, like])
+    return db.prepare(`
+      SELECT c.*, cpg.name AS price_group_name, cpg.discount_pct AS group_discount, cpg.color AS group_color
+      FROM customers c
+      LEFT JOIN customer_price_groups cpg ON c.price_group_id = cpg.id
+      WHERE c.is_active=1 AND (c.full_name LIKE ? OR c.phone LIKE ?) LIMIT 20
+    `).all([like, like])
+  })
+
+  safeHandle('customers:priceGroups', () =>
+    db.prepare('SELECT * FROM customer_price_groups WHERE is_active=1 ORDER BY name').all()
+  )
+
+  safeHandle('customers:setPriceGroup', (_e, customerId: number, groupId: number|null) => {
+    db.prepare(`UPDATE customers SET price_group_id = ?, updated_at = datetime('now') WHERE id = ?`)
+      .run([groupId, customerId])
   })
 
   safeHandle(CH.CUSTOMER_GET,    (_e, id: number) => db.prepare('SELECT * FROM customers WHERE id=?').get([id]))

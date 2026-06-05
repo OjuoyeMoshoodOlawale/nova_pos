@@ -13,12 +13,13 @@ export default function CustomersPage(){
   const [editing,setEditing]=useState<Customer|null>(null)
   const [history,setHistory]=useState<any[]|null>(null)
   const [histName,setHistName]=useState('')
-  const [d,setD]=useState({full_name:'',phone:'',email:'',address:'',notes:''})
+  const [d,setD]=useState({full_name:'',phone:'',email:'',address:'',notes:'',price_group_id:null as number|null})
+  const [groups, setGroups]=useState<any[]>([])
   const [saving,setSaving]=useState(false)
 
-  async function load(){setLoading(true);const r=await window.api.customers.getAll();if(r.success)setCustomers(r.data);setLoading(false)}
+  async function load(){setLoading(true);const [r,g]=await Promise.all([window.api.customers.getAll(),window.api.customers.priceGroups()]);if(r.success)setCustomers(r.data);if(g.success)setGroups(g.data);setLoading(false)}
   useEffect(()=>{load()},[])
-  function openForm(c?:Customer){setEditing(c||null);setD(c?{full_name:c.full_name,phone:c.phone||'',email:c.email||'',address:c.address||'',notes:c.notes||''}:{full_name:'',phone:'',email:'',address:'',notes:''});setShowForm(true)}
+  function openForm(c?:any){setEditing(c||null);setD(c?{full_name:c.full_name,phone:c.phone||'',email:c.email||'',address:c.address||'',notes:c.notes||'',price_group_id:c.price_group_id||null}:{full_name:'',phone:'',email:'',address:'',notes:'',price_group_id:null});setShowForm(true)}
   async function save(){
     if(!d.full_name){addToast('error','Name required');return}
     setSaving(true)
@@ -33,6 +34,7 @@ export default function CustomersPage(){
   const cols: Column<Customer>[]=[
     {key:'full_name',label:'Customer',render:c=><div><p className="font-medium">{c.full_name}</p><p className="text-xs text-slate-400">{c.phone||c.email||'No contact'}</p></div>},
     {key:'phone',label:'Phone',render:c=><span className="text-sm">{c.phone||'—'}</span>},
+    {key:'price_group_name',label:'Group',render:(c:any)=>c.price_group_name&&c.price_group_name!=='Walk-in'?<span className="badge bg-green-100 text-green-700 text-xs">{c.price_group_name}{c.group_discount>0?` -${c.group_discount}%`:''}</span>:<span className="text-xs text-slate-400">Walk-in</span>},
     {key:'balance',label:'Balance',render:c=><span className={`font-medium ${c.balance>0?'text-red-600':c.balance<0?'text-green-600':'text-slate-500'}`}>{sym}{c.balance.toFixed(2)}</span>},
     {key:'created_at',label:'Since',render:c=><span className="text-xs text-slate-400">{new Date(c.created_at).toLocaleDateString()}</span>},
   ]
@@ -49,7 +51,13 @@ export default function CustomersPage(){
           <button onClick={()=>openForm(c)} className="p-1.5 text-slate-400 hover:text-green-600 rounded-lg"><Edit2 className="w-4 h-4"/></button>
         </div>}
       />
-      {showForm&&(<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm"><div className="flex justify-between px-6 py-4 border-b"><h2 className="font-bold">{editing?'Edit Customer':'Add Customer'}</h2><button onClick={()=>setShowForm(false)}><X className="w-5 h-5 text-slate-400"/></button></div><div className="p-6 space-y-4">{[['full_name','Full Name *','text'],['phone','Phone','tel'],['email','Email','email'],['address','Address','text'],['notes','Notes','text']].map(([k,l,t])=><div key={k}><label className="label">{l}</label><input className="input" type={t} value={(d as any)[k]} onChange={e=>setD((p:any)=>({...p,[k]:e.target.value}))}/></div>)}<div className="flex gap-3"><button onClick={()=>setShowForm(false)} className="btn-secondary flex-1">Cancel</button><button onClick={save} disabled={saving} className="btn-primary flex-1">{saving?'Saving...':editing?'Update':'Add'}</button></div></div></div></div>)}
+      {showForm&&(<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm"><div className="flex justify-between px-6 py-4 border-b"><h2 className="font-bold">{editing?'Edit Customer':'Add Customer'}</h2><button onClick={()=>setShowForm(false)}><X className="w-5 h-5 text-slate-400"/></button></div><div className="p-6 space-y-4">{[['full_name','Full Name *','text'],['phone','Phone','tel'],['email','Email','email'],['address','Address','text'],['notes','Notes','text']].map(([k,l,t])=><div key={k}><label className="label">{l}</label><input className="input" type={t} value={(d as any)[k]} onChange={e=>setD((p:any)=>({...p,[k]:e.target.value}))}/></div>)}
+              <div><label className="label">Price Group</label>
+                <select className="input" value={d.price_group_id??''} onChange={e=>setD(p=>({...p,price_group_id:e.target.value?Number(e.target.value):null}))}>
+                  <option value="">Walk-in (standard)</option>
+                  {groups.map((g:any)=><option key={g.id} value={g.id}>{g.name} {g.discount_pct>0?`(-${g.discount_pct}%)`:''}</option>)}
+                </select>
+              </div}<div className="flex gap-3"><button onClick={()=>setShowForm(false)} className="btn-secondary flex-1">Cancel</button><button onClick={save} disabled={saving} className="btn-primary flex-1">{saving?'Saving...':editing?'Update':'Add'}</button></div></div></div></div>)}
       {history&&(<div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto"><div className="flex justify-between px-6 py-4 border-b sticky top-0 bg-white"><h2 className="font-bold">{histName} — Purchase History</h2><button onClick={()=>setHistory(null)}><X className="w-5 h-5 text-slate-400"/></button></div><div className="p-6"><table className="w-full text-sm"><thead><tr className="border-b">{['Receipt','Date','Total','Status'].map(h=><th key={h} className="pb-2 text-left text-xs text-slate-500">{h}</th>)}</tr></thead><tbody className="divide-y divide-slate-50">{history.map((s:any)=><tr key={s.id}><td className="py-2 font-mono text-xs text-blue-600">{s.receipt_no}</td><td className="py-2 text-xs">{new Date(s.sale_date).toLocaleDateString()}</td><td className="py-2 font-medium">{sym}{s.total_amount.toFixed(2)}</td><td className="py-2"><span className={`badge ${s.status==='completed'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{s.status}</span></td></tr>)}</tbody></table>{history.length===0&&<p className="text-center py-8 text-slate-400 text-sm">No purchases yet.</p>}</div></div></div>)}
     </div>
   )

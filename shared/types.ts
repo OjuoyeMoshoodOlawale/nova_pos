@@ -170,16 +170,26 @@ export type CreateCustomerDto = Omit<Customer, 'id' | 'balance' | 'is_active' | 
 
 // ─── CART & SALES ────────────────────────────────────────
 export interface CartItem {
-  product_id:   number
-  product_name: string
-  barcode:      string | null
-  unit_price:   number
-  quantity:     number
+  product_id:    number
+  product_name:  string
+  barcode:       string | null
+  unit_price:    number
+  quantity:      number
+  discount_pct:  number
+  line_total:    number
+  cost_price:    number    // snapshot for COGS calculation
+  sell_mode:     SellMode  // 'unit' or 'bulk'
+  unit_label:    string    // display label e.g. "pcs" or "carton"
+  stock_qty:     number    // available stock snapshot — for over-sell validation
+}
+
+export interface CustomerPriceGroup {
+  id:           number
+  name:         string
   discount_pct: number
-  line_total:   number
-  cost_price:   number    // snapshot for COGS calculation
-  sell_mode:    SellMode  // 'unit' or 'bulk'
-  unit_label:   string    // display label e.g. "pcs" or "carton"
+  description:  string | null
+  color:        string
+  is_active:    boolean
 }
 
 export interface PaymentEntry {

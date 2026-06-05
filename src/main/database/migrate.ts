@@ -339,6 +339,28 @@ ALTER TABLE products ADD COLUMN pending_sell_price  REAL;     -- future unit pri
 ALTER TABLE products ADD COLUMN pending_bulk_price  REAL;     -- future bulk price
 ALTER TABLE products ADD COLUMN price_switch_at_qty REAL;     -- switch when stock <= this
 `,
+  '005_customer_price_groups.sql': `
+-- ─── CUSTOMER PRICE GROUPS ───────────────────────────────
+-- Groups like Walk-in, Wholesale, VIP, Staff
+-- Each group applies a discount % off the standard price
+CREATE TABLE IF NOT EXISTS customer_price_groups (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT    NOT NULL UNIQUE,
+  discount_pct REAL    NOT NULL DEFAULT 0,
+  description  TEXT,
+  color        TEXT    NOT NULL DEFAULT '#6366f1',
+  is_active    INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT OR IGNORE INTO customer_price_groups (name, discount_pct, description, color) VALUES
+  ('Walk-in',   0,    'Standard retail price',              '#6366f1'),
+  ('Wholesale', 10,   '10% off for wholesale buyers',       '#10b981'),
+  ('VIP',       5,    '5% off for loyal customers',         '#f59e0b'),
+  ('Staff',     15,   '15% off for staff purchases',        '#8b5cf6');
+
+ALTER TABLE customers ADD COLUMN price_group_id INTEGER REFERENCES customer_price_groups(id) ON DELETE SET NULL;
+`,
 }
 
 // ─── Run migrations ───────────────────────────────────
