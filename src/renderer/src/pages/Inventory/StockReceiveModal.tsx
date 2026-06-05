@@ -3,6 +3,7 @@ import { Product }        from '@shared/types'
 import { useAuthStore }   from '../../store/authStore'
 import { useAppStore }    from '../../store/appStore'
 import { X, Package, AlertTriangle, TrendingUp, TrendingDown, ChevronRight, Search, Info } from 'lucide-react'
+import { validate } from '../../hooks/useValidation'
 
 const BULK_UNITS = ['carton','crate','dozen','pack','bag','bale','bundle','case','sack','tray','gross','roll']
 type PriceMode = 'keep' | 'switch_now' | 'auto_switch'
@@ -99,13 +100,32 @@ export default function StockReceiveModal({product: initProduct, onClose, onSave
   }
 
   async function handleSave() {
-    if (!product || !user)  { addToast('error','Select a product first'); return }
-    if (qtyBought <= 0)     { addToast('error','Enter quantity received');  return }
-    if (buyingCost <= 0)    { addToast('error','Enter buying price');       return }
+    if (!product || !user) { addToast('error','Select a product first'); return }
 
-    // Validate prices when needed
+    const bulkRules: Record<string, any> = {
+      qtyBought:   { required:true, positive:true, integer: buyMode==='bulk', label: buyMode==='bulk'?`Qty ${bulkUnit}s`:`Qty ${product.unit}s` },
+      buyingCost:  { required:true, positive:true, maxDecimals:2, label:'Buying price' },
+    }
+    if (buyMode === 'bulk') {
+      bulkRules.unitsPerBulk = { required:true, positive:true, integer:true, label:`${product.unit}s per ${bulkUnit}` }
+    }
+    const { errors, isValid } = validate({ qtyBought, buyingCost, unitsPerBulk }, bulkRules)
+    if (!isValid) {
+      const firstError = Object.values(errors)[0]
+      addToast('error', firstError)
+      return
+    }
+
     if (priceMode !== 'keep') {
-      if (unitSellEnabled && unitSellPrice <= 0) { addToast('error','Enter unit selling price'); return }
+      if (unitSellEnabled) {
+        if (unitSellPrice <= 0) { addToast('error','Enter unit selling price'); return }
+        if (unitSellPrice < costPerUnit * 0.5) {
+          if (!confirm(`Unit sell price (${sym}${unitSellPrice}) is much less than cost (${sym}${costPerUnit.toFixed(2)}). Continue?`)) return
+        }
+      }
+      if (bulkSellEnabled && bulkSellPrice > 0 && bulkSellPrice < buyingCost * 0.5) {
+        if (!confirm(`Bulk sell price (${sym}${bulkSellPrice}) is much less than bulk cost (${sym}${buyingCost}). Continue?`)) return
+      }
     }
 
     setSaving(true)
