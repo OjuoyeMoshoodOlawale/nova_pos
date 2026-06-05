@@ -22,15 +22,16 @@ export function withTx<T>(db: DB, fn: () => T): T {
 let _db: DB | null = null
 
 function openDatabase(dbPath: string): DB {
-  // Delete ALL SQLite-related files for this database
-  // so we start completely clean every time
-  for (const suffix of ['', '-shm', '-wal', '-journal']) {
+  // ONLY remove WAL sidecar files — NEVER delete the main .db file.
+  // The main file could be a freshly restored backup; deleting it
+  // would cause a total data loss loop.
+  for (const suffix of ['-shm', '-wal', '-journal']) {
     const f = dbPath + suffix
     if (fs.existsSync(f)) {
-      try { fs.unlinkSync(f); logger.warn(`[DB] Deleted: ${f}`) }
-      catch (e) { logger.error(`[DB] Could not delete ${f}: ${(e as Error).message}`) }
+      try { fs.unlinkSync(f) } catch { /* non-fatal */ }
     }
   }
+  // Create a fresh empty database (main file was absent or unreadable)
   return new NodeSqliteDb(dbPath)
 }
 
@@ -47,8 +48,12 @@ export function getDb(): DB {
     _db.exec('PRAGMA cache_size   = -16000')
     _db.exec('PRAGMA temp_store   = MEMORY')
   } catch (err) {
-    // If locked or corrupted — wipe and recreate
-    logger.warn(`[DB] Open failed (${(err as Error).message}) — wiping and retrying`)
+    // Open failed — clear WAL sidecars and try once more.
+    // NOTE: we do NOT delete novapos.db here. If the file exists but is
+    // unreadable it may be a partially-written restore; deleting it
+    // would destroy the user's data. We let the second attempt fail
+    // with a clear error so the user can restore from backup.
+    logger.warn(`[DB] Open failed (${(err as Error).message}) — clearing WAL files and retrying`)
     try { if (_db) { _db.close(); _db = null } } catch { /* ignore */ }
 
     _db = openDatabase(dbPath)
