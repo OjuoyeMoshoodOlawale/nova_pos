@@ -5,7 +5,6 @@ import { Product, CreateProductDto, UpdateProductDto } from '@shared/types'
 import logger from '../utils/logger'
 
 // ─── Type map from DB row to Product ─────────────────────
-// Handles all nullable new columns (migration 002)
 function toProduct(r: Record<string, unknown>): Product {
   return {
     id:                  r.id as number,
@@ -33,7 +32,10 @@ function toProduct(r: Record<string, unknown>): Product {
     is_active:           Boolean(r.is_active ?? 1),
     created_at:          r.created_at as string,
     updated_at:          r.updated_at as string,
-  }
+    pending_sell_price:  r.pending_sell_price != null ? Number(r.pending_sell_price) : null,
+    pending_bulk_price:  r.pending_bulk_price != null ? Number(r.pending_bulk_price) : null,
+    price_switch_at_qty: r.price_switch_at_qty != null ? Number(r.price_switch_at_qty) : null,
+  } as any
 }
 
 const SELECT = `
@@ -60,10 +62,9 @@ export function findByBarcode(db: DB, barcode: string): Product | null {
 
 export function searchProducts(db: DB, query: string): Product[] {
   const q = `%${query}%`
-  const rows = db.prepare(
+  return (db.prepare(
     `${SELECT} WHERE p.is_active = 1 AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?) ORDER BY p.name LIMIT 50`
-  ).all([q, q, q]) as any[]
-  return rows.map(toProduct)
+  ).all([q, q, q]) as any[]).map(toProduct)
 }
 
 export function getLowStockProducts(db: DB): Product[] {
@@ -86,20 +87,22 @@ export function createProduct(db: DB, dto: Partial<Product> & { name: string }):
     dto.category_id ?? null,  dto.supplier_id ?? null,  null,
     dto.unit ?? 'pcs',
     dto.cost_price ?? 0,      dto.selling_price ?? 0,
-    dto.has_bulk_pricing ? 1 : 0,
-    dto.bulk_unit ?? null,    dto.units_per_bulk ?? 1,
-    dto.bulk_buying_price ?? 0, dto.bulk_selling_price ?? 0,
+    (dto as any).has_bulk_pricing ? 1 : 0,
+    (dto as any).bulk_unit    ?? null,
+    (dto as any).units_per_bulk ?? 1,
+    (dto as any).bulk_buying_price  ?? 0,
+    (dto as any).bulk_selling_price ?? 0,
     dto.stock_qty ?? 0,       dto.reorder_level ?? 5,
-    dto.image_path ?? null,   dto.image_data ?? null,
+    dto.image_path ?? null,   (dto as any).image_data ?? null,
     dto.description ?? null,
   ])
   return getProductById(db, Number(result.lastInsertRowid))!
 }
 
 export function updateProduct(db: DB, id: number, dto: Record<string, unknown>, changedBy?: number): Product {
-  // Snapshot current prices BEFORE changing them
-  const before = db.prepare('SELECT cost_price, selling_price, bulk_selling_price FROM products WHERE id = ?')
-    .get([id]) as { cost_price:number; selling_price:number; bulk_selling_price:number } | undefined
+  const before = db.prepare(
+    'SELECT cost_price, selling_price, bulk_selling_price FROM products WHERE id = ?'
+  ).get([id]) as { cost_price: number; selling_price: number; bulk_selling_price: number } | undefined
 
   const allowed = [
     'name','sku','barcode','category_id','supplier_id','unit',
@@ -120,15 +123,14 @@ export function updateProduct(db: DB, id: number, dto: Record<string, unknown>, 
   vals.push(id)
   db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(vals)
 
-  // Log price changes if any price field changed
-  const newCost  = dto.cost_price     != null ? Number(dto.cost_price)     : before?.cost_price
-  const newSell  = dto.selling_price  != null ? Number(dto.selling_price)  : before?.selling_price
-  const newBulk  = dto.bulk_selling_price != null ? Number(dto.bulk_selling_price) : before?.bulk_selling_price
+  const newCost = dto.cost_price         != null ? Number(dto.cost_price)          : before?.cost_price
+  const newSell = dto.selling_price      != null ? Number(dto.selling_price)       : before?.selling_price
+  const newBulk = dto.bulk_selling_price != null ? Number(dto.bulk_selling_price)  : before?.bulk_selling_price
 
   const priceChanged =
-    (newCost  != null && before?.cost_price     != null && Math.abs(newCost  - before.cost_price)     > 0.001) ||
-    (newSell  != null && before?.selling_price  != null && Math.abs(newSell  - before.selling_price)  > 0.001) ||
-    (newBulk  != null && before?.bulk_selling_price != null && Math.abs(newBulk - before.bulk_selling_price) > 0.001)
+    (newCost != null && before?.cost_price          != null && Math.abs(newCost  - before.cost_price)          > 0.001) ||
+    (newSell != null && before?.selling_price        != null && Math.abs(newSell  - before.selling_price)        > 0.001) ||
+    (newBulk != null && before?.bulk_selling_price   != null && Math.abs(newBulk  - before.bulk_selling_price)   > 0.001)
 
   if (before && priceChanged) {
     db.prepare(`
@@ -136,14 +138,10 @@ export function updateProduct(db: DB, id: number, dto: Record<string, unknown>, 
         (product_id, changed_by, old_cost_price, new_cost_price, old_sell_price, new_sell_price, old_bulk_price, new_bulk_price, reason)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run([
-      id,
-      changedBy ?? null,
-      before.cost_price,
-      newCost ?? before.cost_price,
-      before.selling_price,
-      newSell ?? before.selling_price,
-      before.bulk_selling_price,
-      newBulk ?? before.bulk_selling_price,
+      id, changedBy ?? null,
+      before.cost_price,          newCost ?? before.cost_price,
+      before.selling_price,       newSell ?? before.selling_price,
+      before.bulk_selling_price,  newBulk ?? before.bulk_selling_price,
       (dto.reason as string) ?? 'manual_update',
     ])
     logger.info(`[ProductService] Price change logged for product #${id}`)
@@ -160,86 +158,132 @@ export function archiveProduct(db: DB, id: number): void {
 export type PriceMode = 'keep' | 'switch_now' | 'auto_switch'
 
 export interface StockReceiveInput {
-  product_id:     number
-  buy_mode:       'unit' | 'bulk'
-  qty_received:   number        // total RETAIL units
-  cost_per_unit:  number        // cost per retail unit
-  total_cost:     number
-  supplier_id?:   number
-  notes?:         string
-  // Pricing mode
-  price_mode:               PriceMode
-  new_selling_price?:       number    // new unit sell price
-  new_bulk_selling_price?:  number    // new bulk sell price
-  switch_at_qty?:           number    // for auto_switch: the threshold qty
-  recorded_by:    number
+  product_id:              number
+  buy_mode:                'unit' | 'bulk'
+  qty_received:            number        // total RETAIL units already computed
+  cost_per_unit:           number        // cost per retail unit (bulk_cost ÷ units_per_bulk)
+  total_cost:              number
+  supplier_id?:            number
+  notes?:                  string
+  invoice_ref?:            string        // supplier invoice / delivery note number
+  price_mode:              PriceMode
+  new_selling_price?:      number
+  new_bulk_selling_price?: number
+  switch_at_qty?:          number
+  recorded_by:             number
 }
 
 export function receiveStock(db: DB, input: StockReceiveInput): void {
   withTx(db, () => {
-    const prod = db.prepare('SELECT stock_qty, selling_price FROM products WHERE id = ?')
-      .get([input.product_id]) as { stock_qty: number; selling_price: number }
+    // Fetch existing prices BEFORE updating (needed for audit trail)
+    const prod = db.prepare(`
+      SELECT stock_qty, cost_price, selling_price, bulk_selling_price
+      FROM products WHERE id = ?
+    `).get([input.product_id]) as {
+      stock_qty: number
+      cost_price: number
+      selling_price: number
+      bulk_selling_price: number
+    }
 
-    const unitQty  = input.buy_mode === 'bulk'
-      ? input.qty_received  // already total units
-      : input.qty_received
+    const newQty = prod.stock_qty + input.qty_received
 
-    const newQty = prod.stock_qty + unitQty
+    // ── Build UPDATE ──────────────────────────────────────
+    const updates: string[] = [`stock_qty = ?`, `cost_price = ?`, `updated_at = datetime('now')`]
+    const vals: unknown[]   = [newQty, input.cost_per_unit]
 
-    // Build update based on pricing mode
-    const updates: string[]  = [`stock_qty = ?`, `cost_price = ?`, `updated_at = datetime('now')`]
-    const vals:    unknown[] = [newQty, input.cost_per_unit]
+    let newSellPrice = prod.selling_price
+    let newBulkPrice = prod.bulk_selling_price
 
     if (input.price_mode === 'switch_now') {
-      // Switch price immediately — all stock (old + new) uses new price
-      if (input.new_selling_price != null)      { updates.push('selling_price = ?');       vals.push(input.new_selling_price) }
-      if (input.new_bulk_selling_price != null)  { updates.push('bulk_selling_price = ?');  vals.push(input.new_bulk_selling_price) }
-      // Clear any pending switch
+      if (input.new_selling_price != null) {
+        updates.push('selling_price = ?')
+        vals.push(input.new_selling_price)
+        newSellPrice = input.new_selling_price
+      }
+      if (input.new_bulk_selling_price != null) {
+        updates.push('bulk_selling_price = ?')
+        vals.push(input.new_bulk_selling_price)
+        newBulkPrice = input.new_bulk_selling_price
+      }
       updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
+
     } else if (input.price_mode === 'auto_switch') {
-      // Keep selling at current price until old stock runs out,
-      // then auto-switch to new price at the next sale
       updates.push('pending_sell_price = ?', 'pending_bulk_price = ?', 'price_switch_at_qty = ?')
       vals.push(
-        input.new_selling_price ?? null,
+        input.new_selling_price      ?? null,
         input.new_bulk_selling_price ?? null,
-        input.switch_at_qty ?? input.qty_received, // switch when stock <= new stock qty
+        input.switch_at_qty          ?? input.qty_received,
       )
+      // Pending prices don't take effect yet — keep old for reporting
+      newSellPrice = input.new_selling_price      ?? prod.selling_price
+      newBulkPrice = input.new_bulk_selling_price ?? prod.bulk_selling_price
     }
-    // 'keep' mode: only update stock and cost, no price changes
+    // 'keep' mode: only update stock and cost
 
     vals.push(input.product_id)
     db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals)
 
-    // Stock adjustment record
+    // ── Selling price history log ─────────────────────────
+    // Log to selling_price_history whenever cost OR sell price changes during a restock.
+    // This makes the "Price Changes" tab in ProductForm show restock-driven price changes.
+    const costChanged = Math.abs(input.cost_per_unit - prod.cost_price) > 0.001
+    const sellChanged =
+      input.price_mode !== 'keep' && (
+        Math.abs(newSellPrice - prod.selling_price)   > 0.001 ||
+        Math.abs(newBulkPrice - prod.bulk_selling_price) > 0.001
+      )
+
+    if (costChanged || sellChanged) {
+      db.prepare(`
+        INSERT INTO selling_price_history
+          (product_id, changed_by, old_cost_price, new_cost_price, old_sell_price, new_sell_price, old_bulk_price, new_bulk_price, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'restock')
+      `).run([
+        input.product_id,
+        input.recorded_by,
+        prod.cost_price,      input.cost_per_unit,
+        prod.selling_price,   newSellPrice,
+        prod.bulk_selling_price, newBulkPrice,
+      ])
+    }
+
+    // ── Stock adjustment record ───────────────────────────
     db.prepare(`
       INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason, notes)
       VALUES (?, ?, ?, ?, ?, 'restock', ?)
-    `).run([input.product_id, input.recorded_by, prod.stock_qty, unitQty, newQty, input.notes ?? null])
+    `).run([
+      input.product_id, input.recorded_by,
+      prod.stock_qty, input.qty_received, newQty,
+      input.notes ?? null,
+    ])
 
-    // Price history
+    // ── Purchase price history record ─────────────────────
+    // invoice_ref column added in migration 006
     db.prepare(`
-      INSERT INTO purchase_price_history (product_id, supplier_id, cost_price, qty_bought, sell_unit, notes, recorded_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO purchase_price_history
+        (product_id, supplier_id, cost_price, qty_bought, sell_unit, notes, invoice_ref, recorded_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run([
       input.product_id,
-      input.supplier_id ?? null,
+      input.supplier_id   ?? null,
       input.cost_per_unit,
-      unitQty,
+      input.qty_received,
       input.buy_mode,
-      input.notes ?? null,
+      input.notes         ?? null,
+      input.invoice_ref   ?? null,
       input.recorded_by,
     ])
   })
 
-  logger.info(`[ProductService] Stock received: product #${input.product_id}, +${input.qty_received} ${input.buy_mode}`)
+  logger.info(`[ProductService] Stock received: product #${input.product_id}, +${input.qty_received}`)
 }
 
 // ─── Bulk import ─────────────────────────────────────────
 export function bulkImportProducts(db: DB, rows: any[], userId: number) {
   const result = { imported: 0, skipped: 0, errors: [] as any[] }
   const getCat = db.prepare('SELECT id FROM categories WHERE name = ?')
-  const ins    = db.prepare(`
+  const ins = db.prepare(`
     INSERT OR IGNORE INTO products (name, sku, barcode, category_id, unit, cost_price, selling_price,
     has_bulk_pricing, bulk_unit, units_per_bulk, bulk_buying_price, bulk_selling_price, stock_qty, reorder_level)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -251,23 +295,23 @@ export function bulkImportProducts(db: DB, rows: any[], userId: number) {
 
   withTx(db, () => {
     rows.forEach((row, i) => {
-      if (!row.name?.trim()) { result.errors.push({row:i+1,reason:'Missing name'}); result.skipped++; return }
+      if (!row.name?.trim()) { result.errors.push({ row: i + 1, reason: 'Missing name' }); result.skipped++; return }
       try {
         const catRow = row.category ? getCat.get([row.category]) as any : null
         const r = ins.run([
-          row.name.trim(), row.sku??null, row.barcode??null,
-          catRow?.id??null, row.unit??'pcs',
-          Number(row.cost_price)||0, Number(row.selling_price)||0,
-          row.bulk_unit ? 1 : 0, row.bulk_unit??null, Number(row.units_per_bulk)||1,
-          Number(row.bulk_buying_price)||0, Number(row.bulk_selling_price)||0,
-          Number(row.stock_qty)||0, Number(row.reorder_level)||5,
+          row.name.trim(), row.sku ?? null, row.barcode ?? null,
+          catRow?.id ?? null, row.unit ?? 'pcs',
+          Number(row.cost_price) || 0, Number(row.selling_price) || 0,
+          row.bulk_unit ? 1 : 0, row.bulk_unit ?? null, Number(row.units_per_bulk) || 1,
+          Number(row.bulk_buying_price) || 0, Number(row.bulk_selling_price) || 0,
+          Number(row.stock_qty) || 0, Number(row.reorder_level) || 5,
         ])
-        if (r.changes === 0) { result.skipped++; result.errors.push({row:i+1,reason:`Duplicate: "${row.name}"`}); return }
+        if (r.changes === 0) { result.skipped++; result.errors.push({ row: i + 1, reason: `Duplicate: "${row.name}"` }); return }
         const pid = Number(r.lastInsertRowid)
-        const qty = Number(row.stock_qty)||0
+        const qty = Number(row.stock_qty) || 0
         if (qty > 0) adj.run([pid, userId, qty, qty])
         result.imported++
-      } catch (e: any) { result.errors.push({row:i+1,reason:e.message}); result.skipped++ }
+      } catch (e: any) { result.errors.push({ row: i + 1, reason: e.message }); result.skipped++ }
     })
   })
 
