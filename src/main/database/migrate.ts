@@ -5,7 +5,6 @@ import type { DB } from './connection'
 import { withTx } from './connection'
 import logger from '../utils/logger'
 
-// ─── Schema SQL (inlined — do not read from disk) ─────
 const MIGRATIONS: Record<string, string> = {
   '001_initial_schema.sql': `
 -- ─── MIGRATION TRACKING ──────────────────────────────
@@ -277,19 +276,15 @@ CREATE INDEX IF NOT EXISTS idx_log_user   ON activity_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_log_action ON activity_log(action);
 CREATE INDEX IF NOT EXISTS idx_log_date   ON activity_log(logged_at);
 `,
+
   '002_bulk_unit_pricing.sql': `
 -- ─── BULK / UNIT PRICING ─────────────────────────────────
--- Each product can have two sale modes: unit and bulk
--- e.g. sell 1 bottle (unit) OR 1 carton of 24 bottles (bulk)
-
-ALTER TABLE products ADD COLUMN bulk_unit         TEXT;
-ALTER TABLE products ADD COLUMN units_per_bulk    REAL DEFAULT 1;
-ALTER TABLE products ADD COLUMN bulk_buying_price REAL DEFAULT 0;
-ALTER TABLE products ADD COLUMN bulk_selling_price REAL DEFAULT 0;
-ALTER TABLE products ADD COLUMN has_bulk_pricing  INTEGER DEFAULT 0;
-
--- Image support
-ALTER TABLE products ADD COLUMN image_data        TEXT;  -- base64 data URL
+ALTER TABLE products ADD COLUMN bulk_unit          TEXT;
+ALTER TABLE products ADD COLUMN units_per_bulk     REAL    DEFAULT 1;
+ALTER TABLE products ADD COLUMN bulk_buying_price  REAL    DEFAULT 0;
+ALTER TABLE products ADD COLUMN bulk_selling_price REAL    DEFAULT 0;
+ALTER TABLE products ADD COLUMN has_bulk_pricing   INTEGER DEFAULT 0;
+ALTER TABLE products ADD COLUMN image_data         TEXT;
 
 -- ─── PURCHASE PRICE HISTORY ──────────────────────────────
 CREATE TABLE IF NOT EXISTS purchase_price_history (
@@ -306,14 +301,11 @@ CREATE TABLE IF NOT EXISTS purchase_price_history (
 
 CREATE INDEX IF NOT EXISTS idx_purchase_history_product ON purchase_price_history(product_id);
 `,
+
   '003_price_audit_trail.sql': `
 -- ─── SELLING PRICE HISTORY ────────────────────────────────
--- Every time a product's selling price or cost price changes,
--- we log WHO changed it, WHEN, and what the old/new values were.
--- This is separate from purchase_price_history (buying price).
--- Past sale_items records are NEVER touched — they already
--- store a price snapshot at time of sale.
-
+-- Past sale_items records are NEVER touched — they store a price snapshot
+-- at the exact moment of sale (both unit_price and cost_price).
 CREATE TABLE IF NOT EXISTS selling_price_history (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id      INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -331,18 +323,16 @@ CREATE TABLE IF NOT EXISTS selling_price_history (
 CREATE INDEX IF NOT EXISTS idx_price_history_product ON selling_price_history(product_id);
 CREATE INDEX IF NOT EXISTS idx_price_history_date    ON selling_price_history(changed_at);
 `,
+
   '004_pending_price_switch.sql': `
--- When new stock arrives at a different cost, the shop can choose:
--- A) keep current price  B) switch now  C) auto-switch when old stock runs out
--- Option C uses these fields:
-ALTER TABLE products ADD COLUMN pending_sell_price  REAL;     -- future unit price
-ALTER TABLE products ADD COLUMN pending_bulk_price  REAL;     -- future bulk price
-ALTER TABLE products ADD COLUMN price_switch_at_qty REAL;     -- switch when stock <= this
+-- Auto-switch pricing when old stock runs out
+ALTER TABLE products ADD COLUMN pending_sell_price  REAL;
+ALTER TABLE products ADD COLUMN pending_bulk_price  REAL;
+ALTER TABLE products ADD COLUMN price_switch_at_qty REAL;
 `,
+
   '005_customer_price_groups.sql': `
 -- ─── CUSTOMER PRICE GROUPS ───────────────────────────────
--- Groups like Walk-in, Wholesale, VIP, Staff
--- Each group applies a discount % off the standard price
 CREATE TABLE IF NOT EXISTS customer_price_groups (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   name         TEXT    NOT NULL UNIQUE,
@@ -354,18 +344,34 @@ CREATE TABLE IF NOT EXISTS customer_price_groups (
 );
 
 INSERT OR IGNORE INTO customer_price_groups (name, discount_pct, description, color) VALUES
-  ('Walk-in',   0,    'Standard retail price',              '#6366f1'),
-  ('Wholesale', 10,   '10% off for wholesale buyers',       '#10b981'),
-  ('VIP',       5,    '5% off for loyal customers',         '#f59e0b'),
-  ('Staff',     15,   '15% off for staff purchases',        '#8b5cf6');
+  ('Walk-in',   0,  'Standard retail price',        '#6366f1'),
+  ('Wholesale', 10, '10% off for wholesale buyers',  '#10b981'),
+  ('VIP',       5,  '5% off for loyal customers',    '#f59e0b'),
+  ('Staff',     15, '15% off for staff purchases',   '#8b5cf6');
 
 ALTER TABLE customers ADD COLUMN price_group_id INTEGER REFERENCES customer_price_groups(id) ON DELETE SET NULL;
+`,
+
+  '006_tax_snapshot_and_invoice_ref.sql': `
+-- ─── TAX SNAPSHOT ON SALES ────────────────────────────────
+-- VAT policies can change at any time. These columns permanently record
+-- the tax rate AND mode (inclusive/exclusive) that was active at the
+-- exact moment each sale was processed.
+-- IMMUTABLE: past sale records must never be modified.
+-- Reports use sales.tax_amount (already stored) for revenue; these
+-- columns enable audits of exactly what VAT rate was applied.
+ALTER TABLE sales ADD COLUMN tax_rate_applied      REAL    DEFAULT 7.5;
+ALTER TABLE sales ADD COLUMN tax_inclusive_applied INTEGER DEFAULT 0;
+
+-- ─── INVOICE REF ON PURCHASE HISTORY ─────────────────────
+-- Store the supplier invoice / delivery note number with each stock receipt.
+-- Enables reconciliation between NovaPOS purchase records and paper invoices.
+ALTER TABLE purchase_price_history ADD COLUMN invoice_ref TEXT;
 `,
 }
 
 // ─── Run migrations ───────────────────────────────────
 export function runMigrations(db: DB): void {
-  // Ensure tracking table exists
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -381,7 +387,6 @@ export function runMigrations(db: DB): void {
   let count = 0
   for (const [name, sql] of Object.entries(MIGRATIONS).sort()) {
     if (applied.has(name)) continue
-
     logger.info(`[Migrate] Applying: ${name}`)
     withTx(db, () => {
       db.exec(sql)
@@ -394,8 +399,3 @@ export function runMigrations(db: DB): void {
   if (count === 0) logger.info('[Migrate] Database is up to date')
   else logger.info(`[Migrate] ${count} migration(s) applied`)
 }
-
-// ─── INLINE MIGRATION 002 ─────────────────────────────────
-// Injected directly into the MIGRATIONS object above.
-// Add this key to the MIGRATIONS record in migrate.ts:
-
