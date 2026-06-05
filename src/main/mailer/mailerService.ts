@@ -1,11 +1,11 @@
 // src/main/mailer/mailerService.ts
 import nodemailer, { Transporter } from 'nodemailer'
-import fs from 'node:fs'
+import fs   from 'node:fs'
 import path from 'node:path'
-import zlib from 'node:zlib'
+import { createHash, createCipheriv, randomBytes } from 'node:crypto'
 import { app } from 'electron'
 import { format } from 'date-fns'
-import { getSetting, getAllSettings } from '../services/settingsService'
+import { getSetting, setSetting, getAllSettings } from '../services/settingsService'
 import { getDb } from '../database/connection'
 import { buildDailyReport, buildMonthlyReport, buildYearlyReport } from '../services/reportService'
 import logger from '../utils/logger'
@@ -85,7 +85,82 @@ export async function sendMonthlyReportEmail(year: number, month: number): Promi
   logger.info(`[Mailer] Monthly report sent: ${year}-${month}`)
 }
 
-// ─── BACKUP SERVICE ───────────────────────────────────────
+// ─── BACKUP SERVICE ──────────────────────────────────────
+// Auto backup uses the SAME encrypted .novaenc format as the
+// "Backup Now" button.  Both paths must stay in sync.
+// ─────────────────────────────────────────────────────────
+
+// AES-256-GCM constants — must match settings.handler.ts
+const MAGIC_STR  = 'NOVA'
+const VERSION_B  = 0x01
+const NONCE_LEN  = 12   // GCM nonce
+const TAG_LEN    = 16   // GCM auth tag
+const HEADER_LEN = 4 + 1 + NONCE_LEN + TAG_LEN  // 33 bytes
+
+/** Derive AES-256 key from the installation activation key (same logic as settings.handler.ts). */
+function deriveBackupKey(): Buffer {
+  const db = getDb()
+  try {
+    const act = db.prepare('SELECT activation_key FROM activation LIMIT 1').get() as any
+    if (act?.activation_key) {
+      return createHash('sha256')
+        .update(`${act.activation_key}:nova-pos-encrypted-backup-v1`)
+        .digest()
+    }
+  } catch { /* fall through */ }
+  // Fallback: reuse or generate a persistent random key in settings
+  try {
+    let stored = getSetting(db, 'backup_enc_key')
+    if (!stored || stored.length < 64) {
+      stored = randomBytes(32).toString('hex')
+      setSetting(db, 'backup_enc_key', stored)
+    }
+    return Buffer.from(stored, 'hex')
+  } catch { /* absolute fallback */ }
+  return createHash('sha256').update('nova-pos-fallback-key').digest()
+}
+
+/** Encrypt a DB file to a .novaenc buffer (same format as settings.handler.ts). */
+function encryptDbToBuffer(dbPath: string): Buffer {
+  const key       = deriveBackupKey()
+  const plaintext = fs.readFileSync(dbPath)
+  const nonce     = randomBytes(NONCE_LEN)
+  const cipher    = createCipheriv('aes-256-gcm', key, nonce)
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  const tag       = cipher.getAuthTag()
+  return Buffer.concat([
+    Buffer.from(MAGIC_STR),
+    Buffer.from([VERSION_B]),
+    nonce,
+    tag,
+    encrypted,
+  ])
+}
+
+/** Resolve the backup directory — mirrors resolveBackupDir() in settings.handler.ts. */
+function resolveBackupDirLocal(): string {
+  const db = getDb()
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'backup_path'").get() as any
+    if (row?.value && typeof row.value === 'string' && row.value.trim()) {
+      return row.value.trim()
+    }
+  } catch { /* fall through */ }
+  try { return path.join(app.getPath('userData'), 'backups') } catch {}
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, 'nova-pos', 'backups')
+  }
+  return path.join(path.dirname(process.execPath), 'nova-pos-backups')
+}
+
+/** Resolve DB path — mirrors getDbPath() in settings.handler.ts. */
+function resolveDbPath(): string {
+  try { return path.join(app.getPath('userData'), 'novapos.db') } catch {}
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, 'nova-pos', 'novapos.db')
+  }
+  return path.join(path.dirname(process.execPath), 'novapos.db')
+}
 
 interface BackupResult {
   path?: string
@@ -94,91 +169,75 @@ interface BackupResult {
 }
 
 export async function performBackup(): Promise<BackupResult> {
-  const db = getDb()
-  const settings = getAllSettings(db)
-  const destination = settings.backup_destination ?? 'local'
-  const dbPath = path.join(app.getPath('userData'), 'novapos.db')
+  const db        = getDb()
+  const settings  = getAllSettings(db)
+  const dbPath    = resolveDbPath()
+  const backupDir = resolveBackupDirLocal()
   const timestamp = format(new Date(), 'yyyy-MM-dd_HH-mm')
-  const backupName = `novapos-backup-${timestamp}.db.gz`
+  const filename  = `novapos-backup-${timestamp}.novaenc`
 
-  // ── Checkpoint WAL so backup is complete ───────────────
-  // WAL checkpoint removed — not using WAL mode
+  // ── Encrypt the live database ─────────────────────────
+  // Same AES-256-GCM format as the "Backup Now" button.
+  const encryptedBlob = encryptDbToBuffer(dbPath)
 
-  // ── Gzip the database file ─────────────────────────────
-  const tempPath = path.join(app.getPath('temp'), backupName)
-  await gzipFile(dbPath, tempPath)
-  const size = fs.statSync(tempPath).size
+  // ── Save to backup folder ────────────────────────────
+  fs.mkdirSync(backupDir, { recursive: true })
+  const savedPath = path.join(backupDir, filename)
+  fs.writeFileSync(savedPath, encryptedBlob)
+  logger.info(`[Backup] Encrypted backup saved: ${savedPath}`)
 
-  let savedPath: string | undefined
+  // Record last backup time and file in settings
+  try {
+    setSetting(db, 'last_backup_at',   new Date().toISOString())
+    setSetting(db, 'last_backup_file', savedPath)
+  } catch { /* non-fatal */ }
+
+  // ── Prune old .novaenc backups (keep 30) ─────────────
+  try {
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.startsWith('novapos-backup-') && f.endsWith('.novaenc'))
+      .sort()
+    if (files.length > 30) {
+      files.slice(0, files.length - 30).forEach(f => {
+        try { fs.unlinkSync(path.join(backupDir, f)) } catch {}
+        logger.info(`[Backup] Pruned old backup: ${f}`)
+      })
+    }
+  } catch { /* non-fatal */ }
+
+  const size = encryptedBlob.length
   let emailSent = false
 
-  // ── Local backup ────────────────────────────────────────
-  if (destination === 'local' || destination === 'both') {
-    const localDir = settings.backup_local_path || path.join(app.getPath('userData'), 'backups')
-    fs.mkdirSync(localDir, { recursive: true })
-    savedPath = path.join(localDir, backupName)
-    fs.copyFileSync(tempPath, savedPath)
-
-    // Keep only last 7 local backups
-    pruneOldBackups(localDir, 7)
-    logger.info(`[Backup] Local backup saved: ${savedPath}`)
-  }
-
-  // ── Email backup ─────────────────────────────────────────
-  if (destination === 'email' || destination === 'both') {
+  // ── Optional: email the encrypted backup ─────────────
+  if (settings.backup_destination === 'email' || settings.backup_destination === 'both') {
     try {
       const transport = createTransport()
-      const settingsAll = getAllSettings(db)
       await transport.sendMail({
-        from: `"${settingsAll.smtp_from_name}" <${settingsAll.smtp_from_email}>`,
-        to: settingsAll.backup_email || settingsAll.manager_email,
-        subject: `NovaPOS Backup — ${timestamp}`,
+        from: `"${settings.smtp_from_name}" <${settings.smtp_from_email}>`,
+        to:   settings.backup_email || settings.manager_email,
+        subject: `NovaPOS Encrypted Backup — ${timestamp}`,
         html: `
           <p>Your NovaPOS database backup is attached.</p>
           <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
-          <p><strong>Size:</strong> ${(size / 1024).toFixed(1)} KB (compressed)</p>
-          <p>Store this file safely. To restore, go to Settings → Backup & Restore → Restore.</p>
+          <p><strong>Size:</strong> ${(size / 1024).toFixed(1)} KB (encrypted)</p>
+          <p><strong>Format:</strong> AES-256-GCM encrypted (.novaenc)</p>
+          <p>To restore, go to Settings → Backup → Restore and select this file.
+             You must be on an installation activated with the same licence key.</p>
         `,
         attachments: [{
-          filename: backupName,
-          path: tempPath,
-          contentType: 'application/gzip',
+          filename,
+          content: encryptedBlob,
+          contentType: 'application/octet-stream',
         }],
       })
       emailSent = true
-      logger.info(`[Backup] Email backup sent to ${settingsAll.backup_email || settingsAll.manager_email}`)
+      logger.info(`[Backup] Email backup sent to ${settings.backup_email || settings.manager_email}`)
     } catch (err) {
       logger.error('[Backup] Email backup failed:', (err as Error).message)
     }
   }
 
-  // Clean temp file
-  fs.unlinkSync(tempPath)
-
   return { path: savedPath, size, emailSent }
-}
-
-function gzipFile(input: string, output: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const src = fs.createReadStream(input)
-    const dest = fs.createWriteStream(output)
-    const gz = zlib.createGzip({ level: 9 })
-    src.pipe(gz).pipe(dest)
-    dest.on('finish', resolve)
-    dest.on('error', reject)
-  })
-}
-
-function pruneOldBackups(dir: string, keep: number): void {
-  const files = fs.readdirSync(dir)
-    .filter((f) => f.endsWith('.db.gz'))
-    .map((f) => ({ name: f, time: fs.statSync(path.join(dir, f)).mtimeMs }))
-    .sort((a, b) => b.time - a.time)
-
-  for (const file of files.slice(keep)) {
-    fs.unlinkSync(path.join(dir, file.name))
-    logger.info(`[Backup] Pruned old backup: ${file.name}`)
-  }
 }
 
 // ─── BACKUP SCHEDULER ────────────────────────────────────
