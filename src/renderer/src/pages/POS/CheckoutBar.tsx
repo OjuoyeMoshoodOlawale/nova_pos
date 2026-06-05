@@ -1,20 +1,24 @@
-// CheckoutBar.tsx — Unified hardware scanner + manual search
+// CheckoutBar.tsx — Unified scanner + name search + bulk/unit chooser
 // ─────────────────────────────────────────────────────────
-// USB barcode scanners are keyboard emulators (HID).
-// They type chars FAST (5-80ms apart) then send Enter.
-// Human typing is SLOW (150ms+ between keys).
-// We capture both in one input — scanner fires onBarcode,
-// manual typing shows a search dropdown.
+// USB barcode scanners are HID keyboard emulators:
+//   chars arrive < 100 ms apart, then Enter fires.
+//   Human typing is > 150 ms between keys.
+// We handle BOTH in one input — scanner fires addProduct,
+// manual typing shows a dropdown with unit AND bulk options.
+//
+// After a barcode scan, if the product has bulk pricing, we
+// show a 4-second choice bar:  [Add as UNIT]  [Add as BULK]
+// If neither is chosen within 4 seconds → defaults to UNIT.
 // ─────────────────────────────────────────────────────────
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Product } from '@shared/types'
 import { useCartStore } from '../../store/cartStore'
 import { useAppStore }  from '../../store/appStore'
-import { Scan, Search, CheckCircle, XCircle, Loader2, Wifi } from 'lucide-react'
+import { Scan, Search, CheckCircle, XCircle, Loader2, Package } from 'lucide-react'
 
 type Status = 'ready' | 'scanning' | 'found' | 'notfound' | 'searching'
+type SellMode = 'unit' | 'bulk'
 
-// ── Beep via Web Audio ────────────────────────────────────
 function beep(ok: boolean) {
   try {
     const ctx  = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -26,13 +30,13 @@ function beep(ok: boolean) {
     gain.gain.setValueAtTime(0.08, ctx.currentTime)
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (ok ? 0.15 : 0.5))
     osc.start(); osc.stop(ctx.currentTime + (ok ? 0.15 : 0.5))
-  } catch { /* audio not available */ }
+  } catch { /* audio unavailable */ }
 }
 
 export default function CheckoutBar() {
-  const cart = useCartStore()
+  const cart              = useCartStore()
   const { addToast, profile } = useAppStore()
-  const sym = profile?.currency_symbol ?? '₦'
+  const sym               = profile?.currency_symbol ?? '₦'
 
   const [value,    setValue]    = useState('')
   const [status,   setStatus]   = useState<Status>('ready')
@@ -40,20 +44,21 @@ export default function CheckoutBar() {
   const [lastMsg,  setLastMsg]  = useState('')
   const [showDrop, setShowDrop] = useState(false)
 
+  // Bulk/unit choice after barcode scan
+  const [bulkChoice,    setBulkChoice]    = useState<Product | null>(null)
+  const bulkChoiceTimer = useRef<ReturnType<typeof setTimeout>>()
+
   const inputRef    = useRef<HTMLInputElement>(null)
   const lastKeyTime = useRef(0)
   const scanBuffer  = useRef('')
-  const scanMode    = useRef(false)   // true when chars are scanner-speed
+  const scanMode    = useRef(false)
   const searchTimer = useRef<ReturnType<typeof setTimeout>>()
-  const onScanRef   = useRef<(code:string)=>void>(()=>{})
+  const onScanRef   = useRef<(code: string) => void>(() => {})
 
-  // ── Keep input focused ────────────────────────────────
+  // Keep input focused unless a modal is open
   useEffect(() => {
     const focus = () => {
-      // Don't steal focus from modals
-      if (!document.querySelector('[role="dialog"]')) {
-        inputRef.current?.focus()
-      }
+      if (!document.querySelector('[role="dialog"]')) inputRef.current?.focus()
     }
     focus()
     const onClick = (e: MouseEvent) => {
@@ -66,14 +71,20 @@ export default function CheckoutBar() {
     return () => document.removeEventListener('click', onClick)
   }, [])
 
-  // ── Add product to cart ───────────────────────────────
-  async function addProduct(product: Product, mode: 'unit'|'bulk' = 'unit') {
+  // Cleanup bulk-choice timer on unmount
+  useEffect(() => () => clearTimeout(bulkChoiceTimer.current), [])
+
+  // ── Add to cart ───────────────────────────────────────
+  async function addProduct(product: Product, mode: SellMode = 'unit') {
+    clearBulkChoice()
     cart.addItem(product, mode)
-    const label = mode === 'bulk' && product.bulk_unit
-      ? `${product.name} (${product.bulk_unit})`
+    const label = mode === 'bulk' && (product as any).bulk_unit
+      ? `${product.name} (${(product as any).bulk_unit})`
       : product.name
-    const price = mode === 'bulk' ? product.bulk_selling_price : product.selling_price
-    setLastMsg(`✓  ${label}  ${sym}${price.toFixed(2)}`)
+    const price = mode === 'bulk'
+      ? (product as any).bulk_selling_price
+      : product.selling_price
+    setLastMsg(`✓  ${label}  ${sym}${price?.toFixed(2)}`)
     setStatus('found')
     setShowDrop(false)
     setValue('')
@@ -83,13 +94,34 @@ export default function CheckoutBar() {
     setTimeout(() => { setStatus('ready'); setLastMsg('') }, 2500)
   }
 
-  // ── Handle scanned barcode ────────────────────────────
+  function clearBulkChoice() {
+    clearTimeout(bulkChoiceTimer.current)
+    setBulkChoice(null)
+  }
+
+  // ── Barcode scan handler ──────────────────────────────
   const handleBarcode = useCallback(async (code: string) => {
     if (!code.trim() || code.length < 2) return
     setStatus('scanning')
     const r = await window.api.products.findBarcode(code.trim())
+
     if (r.success && r.data) {
-      await addProduct(r.data)
+      const product = r.data as Product
+
+      // If product has bulk pricing, show choice for 4 seconds
+      if ((product as any).has_bulk_pricing && (product as any).bulk_unit) {
+        setBulkChoice(product)
+        clearTimeout(bulkChoiceTimer.current)
+        bulkChoiceTimer.current = setTimeout(() => {
+          // Timeout — default to unit
+          addProduct(product, 'unit')
+        }, 4000)
+        setStatus('ready')
+        setValue('')
+        beep(true)
+      } else {
+        await addProduct(product, 'unit')
+      }
     } else {
       beep(false)
       setLastMsg(`✗ Not found: ${code}`)
@@ -101,7 +133,7 @@ export default function CheckoutBar() {
 
   onScanRef.current = handleBarcode
 
-  // ── Search products (manual typing) ──────────────────
+  // ── Product name / SKU search ─────────────────────────
   async function doSearch(q: string) {
     if (!q.trim()) { setResults([]); setShowDrop(false); return }
     setStatus('searching')
@@ -113,10 +145,7 @@ export default function CheckoutBar() {
     setStatus('ready')
   }
 
-  // ── KEY DETECTION ─────────────────────────────────────
-  // Scanner chars arrive < 100ms apart (often 10-50ms)
-  // Human typing arrives > 150ms apart
-  // We use 100ms as threshold — safe for all scanners
+  // ── Key detection — scanner vs human typing ───────────
   const SCAN_THRESHOLD_MS = 100
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -124,10 +153,9 @@ export default function CheckoutBar() {
     const gap = now - lastKeyTime.current
     lastKeyTime.current = now
 
-    // Accumulate into scan buffer if chars are fast
     if (e.key.length === 1 && gap < SCAN_THRESHOLD_MS) {
       scanBuffer.current += e.key
-      scanMode.current = true
+      scanMode.current    = true
     }
 
     if (e.key === 'Enter') {
@@ -135,7 +163,6 @@ export default function CheckoutBar() {
       const buf = scanBuffer.current.trim()
 
       if (scanMode.current && buf.length >= 2) {
-        // ── SCANNER path: fire immediately ──
         onScanRef.current(buf)
         scanBuffer.current = ''
         scanMode.current   = false
@@ -143,10 +170,8 @@ export default function CheckoutBar() {
         clearTimeout(searchTimer.current)
         setShowDrop(false)
       } else if (results.length > 0) {
-        // ── MANUAL path: add first search result ──
         addProduct(results[0])
       } else if (value.trim().length >= 2) {
-        // ── FALLBACK: try as barcode ──
         onScanRef.current(value.trim())
         setValue('')
       }
@@ -155,12 +180,9 @@ export default function CheckoutBar() {
 
     if (e.key === 'Escape') {
       setValue(''); scanBuffer.current = ''; scanMode.current = false
-      setShowDrop(false); setResults([])
+      setShowDrop(false); setResults([]); clearBulkChoice()
       return
     }
-
-    // Arrow keys navigate dropdown
-    if (e.key === 'ArrowDown') { e.preventDefault(); /* TODO */ }
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -170,7 +192,6 @@ export default function CheckoutBar() {
 
     setValue(v)
 
-    // If this char arrived fast — scanner mode, don't search
     if (gap < SCAN_THRESHOLD_MS) {
       scanBuffer.current = v
       scanMode.current   = true
@@ -178,10 +199,8 @@ export default function CheckoutBar() {
       return
     }
 
-    // Human typing — reset scan mode, start search
     scanMode.current   = false
     scanBuffer.current = ''
-
     clearTimeout(searchTimer.current)
     if (v.trim().length >= 1) {
       searchTimer.current = setTimeout(() => doSearch(v), 280)
@@ -202,61 +221,92 @@ export default function CheckoutBar() {
   const Icon = sc.icon
 
   return (
-    <div className="bg-white border-b border-slate-200 px-4 py-3 space-y-2.5">
-      <div className="flex items-center gap-3">
+    <div className="bg-white border-b border-slate-200 px-4 py-3 space-y-2">
 
-        {/* ── Main input ── */}
+      <div className="flex items-center gap-3">
+        {/* ── Main input (scanner + name search) ── */}
         <div className="relative flex-1">
-          <Scan className="absolute left-3.5 top-2.5 w-4 h-4 text-slate-400 pointer-events-none"/>
+          <Search className="absolute left-3.5 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
           <input
             ref={inputRef}
-            id="checkout-bar"
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onBlur={() => setTimeout(() => setShowDrop(false), 200)}
             onFocus={() => value && results.length > 0 && setShowDrop(true)}
-            placeholder="Scan barcode  ·  or type product name to search"
+            placeholder="Scan barcode  ·  or type product name / SKU to search"
             className="w-full pl-10 pr-4 py-2.5 border-2 border-slate-200 focus:border-blue-500 rounded-xl text-sm focus:outline-none bg-slate-50 focus:bg-white transition-colors"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
           />
 
-          {/* Search dropdown */}
+          {/* ── Search dropdown ── */}
           {showDrop && results.length > 0 && (
             <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl mt-1 z-50 overflow-hidden max-h-80 overflow-y-auto">
-              {results.map(p => (
-                <button key={p.id}
-                  onMouseDown={e => { e.preventDefault(); addProduct(p) }}
-                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 transition text-left border-b border-slate-50 last:border-0">
-                  <div className="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
-                    {p.image_data
-                      ? <img src={p.image_data} className="w-full h-full object-cover"/>
-                      : <span className="text-slate-300 text-xs">IMG</span>}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
-                    <p className="text-xs text-slate-400">
-                      {p.barcode ? <span className="font-mono">{p.barcode} · </span> : ''}
-                      {p.stock_qty} {p.unit} in stock
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0 space-y-0.5">
-                    <p className="text-sm font-bold text-blue-600">{sym}{p.selling_price.toFixed(2)}<span className="text-xs font-normal text-slate-400">/{p.unit}</span></p>
-                    {p.has_bulk_pricing && p.bulk_unit && (
+              {results.map(p => {
+                const hasBulk = !!(p as any).has_bulk_pricing && !!(p as any).bulk_unit
+                return (
+                  <div key={p.id} className="border-b border-slate-50 last:border-0">
+                    {/* Unit row */}
+                    <button
+                      onMouseDown={e => { e.preventDefault(); addProduct(p, 'unit') }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition text-left"
+                    >
+                      <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
+                        {(p as any).image_data
+                          ? <img src={(p as any).image_data} className="w-full h-full object-cover" />
+                          : <Package className="w-4 h-4 text-slate-300" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
+                        <p className="text-xs text-slate-400">
+                          {(p as any).barcode ? <span className="font-mono">{(p as any).barcode} · </span> : ''}
+                          {p.stock_qty} {p.unit} in stock
+                        </p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className="text-sm font-bold text-blue-600">
+                          {sym}{p.selling_price.toFixed(2)}
+                          <span className="text-xs font-normal text-slate-400">/{p.unit}</span>
+                        </span>
+                        {hasBulk && (
+                          <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mt-0.5">
+                            by unit
+                          </p>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Bulk row (only if product has bulk pricing) */}
+                    {hasBulk && (
                       <button
-                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); addProduct(p,'bulk') }}
-                        className="block text-xs text-amber-600 hover:text-amber-800 hover:underline">
-                        {sym}{p.bulk_selling_price?.toFixed(2)}/{p.bulk_unit}
+                        onMouseDown={e => { e.stopPropagation(); e.preventDefault(); addProduct(p, 'bulk') }}
+                        className="w-full flex items-center justify-between px-4 py-2 bg-amber-50 hover:bg-amber-100 transition text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">📦</span>
+                          <div>
+                            <span className="text-xs font-semibold text-amber-800">
+                              Buy by {(p as any).bulk_unit}
+                            </span>
+                            <span className="text-xs text-amber-600 ml-2">
+                              ({(p as any).units_per_bulk} {p.unit}s each)
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-sm font-bold text-amber-700">
+                          {sym}{(p as any).bulk_selling_price?.toFixed(2)}
+                          <span className="text-xs font-normal text-amber-500">/{(p as any).bulk_unit}</span>
+                        </span>
                       </button>
                     )}
                   </div>
-                </button>
-              ))}
+                )
+              })}
               <div className="px-4 py-2 bg-slate-50 text-xs text-slate-400 flex items-center gap-1">
-                <kbd className="bg-white border border-slate-200 rounded px-1.5 py-0.5 font-mono">↵ Enter</kbd>
-                adds first result
+                <kbd className="bg-white border border-slate-200 rounded px-1.5 py-0.5 font-mono text-[10px]">↵</kbd>
+                adds first result as unit · click bulk row for bulk pricing
               </div>
             </div>
           )}
@@ -264,28 +314,54 @@ export default function CheckoutBar() {
 
         {/* ── Status pill ── */}
         <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold border flex-shrink-0 min-w-[140px] ${sc.cls}`}>
-          <Icon className={`w-4 h-4 flex-shrink-0 ${sc.spin ? 'animate-spin' : ''}`}/>
+          <Icon className={`w-4 h-4 flex-shrink-0 ${sc.spin ? 'animate-spin' : ''}`} />
           <span className="truncate">{sc.label}</span>
         </div>
       </div>
 
-      {/* ── Mode hint ── */}
-      <div className="flex items-center justify-between text-xs text-slate-400">
-        <span>
-          <span className="font-medium text-slate-500">Scanner:</span> scan barcode → item added instantly
-          <span className="mx-2">·</span>
-          <span className="font-medium text-slate-500">Manual:</span> type name → pick from dropdown or press Enter
-        </span>
-        <button
-          onClick={() => {
-            // Test: simulate a scan event
-            const testCode = prompt('Enter barcode to test:')
-            if (testCode) onScanRef.current(testCode)
-          }}
-          className="text-slate-300 hover:text-slate-500 transition">
-          test
-        </button>
-      </div>
+      {/* ── Bulk / Unit choice after barcode scan ─────── */}
+      {bulkChoice && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-2.5 animate-pulse-once">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-900 truncate">{bulkChoice.name}</p>
+            <p className="text-xs text-amber-600">This product has bulk pricing — how are they buying?</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => addProduct(bulkChoice, 'unit')}
+              className="px-3 py-2 bg-white border-2 border-blue-400 text-blue-700 rounded-lg text-xs font-bold hover:bg-blue-50 transition"
+            >
+              <div className="text-center">
+                <div>UNIT</div>
+                <div className="font-normal opacity-70">{sym}{bulkChoice.selling_price.toFixed(2)}/{bulkChoice.unit}</div>
+              </div>
+            </button>
+            <button
+              onClick={() => addProduct(bulkChoice, 'bulk')}
+              className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition"
+            >
+              <div className="text-center">
+                <div>📦 BULK</div>
+                <div className="font-normal opacity-80">
+                  {sym}{(bulkChoice as any).bulk_selling_price?.toFixed(2)}/{(bulkChoice as any).bulk_unit}
+                </div>
+              </div>
+            </button>
+            <button onClick={clearBulkChoice} className="text-amber-400 hover:text-amber-700 p-1 text-lg font-bold">×</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Hint strip ── */}
+      {!bulkChoice && (
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span>
+            <span className="font-medium text-slate-500">Scanner:</span> scan barcode → added instantly
+            <span className="mx-2">·</span>
+            <span className="font-medium text-slate-500">Manual:</span> type name → dropdown (unit or bulk)
+          </span>
+        </div>
+      )}
     </div>
   )
 }
