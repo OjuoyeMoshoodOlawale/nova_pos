@@ -228,6 +228,74 @@ Report handler uses static ES module imports — no `require()` — so reports w
 
 ---
 
+
+## POS — Cashier & Register Management
+
+### Cashier session strip
+Every POS screen shows a dark header strip with:
+- Current cashier's name and role
+- **Today's sales count** and **total amount collected** for that cashier (refreshes after every sale)
+- Today's date
+
+This lets a manager glance at any terminal and immediately see whose shift it is and how much they've collected without opening any report.
+
+For a full cashier-by-cashier breakdown: **Reports → Daily Report → Cashier Performance** section.
+
+### Bulk vs Unit at the POS
+
+**Barcode scanner path:**
+1. Scanner fires → product found
+2. If the product has bulk pricing, a **choice bar** appears for 4 seconds showing both options:
+   - `[UNIT  ₦X/pcs]` — sell individually
+   - `[📦 BULK  ₦Y/carton]` — sell by bulk unit
+3. Cashier taps the right button; if neither is tapped within 4 seconds → defaults to UNIT
+
+**Name/SKU search path:**
+- Type in the checkout bar → dropdown appears
+- Each product with bulk pricing shows **two rows**:
+  - Top row (white): unit price → click to add as unit
+  - Bottom row (amber): `📦 Buy by carton — ₦Y/carton` → click to add as bulk
+- `↵ Enter` always adds as unit (safest default)
+
+### Searching products at checkout
+The checkout bar handles **both** in one input — no switching needed:
+- **USB barcode scanner**: scanner types fast → detected by timing → product added (or choice shown)
+- **Manual name/SKU search**: type at human speed → dropdown appears after 280 ms
+- **Manual barcode**: type the barcode number, press Enter → looked up by barcode
+
+---
+
+## Backup — Simplified
+
+The backup system has one job: keep a copy of your database safe.
+
+### How it works
+1. **Set a backup folder** (Settings → Backup → Browse)
+   - Default: `%APPDATA%\nova-pos\backups\`
+   - 💡 Set this to your Google Drive sync folder for automatic cloud backup
+2. Backups are **timestamped `.db` files** — e.g. `novapos-backup-2026-06-05T22-00-00.db`
+3. Last 30 files are kept automatically; older ones are pruned
+
+### Backup actions
+- **Backup Now** — immediately saves to the configured folder
+- **Download** — opens a Save-As dialog so you can save to any location (e.g. USB drive)
+- **Restore** — opens a file picker to restore from any `.db` backup file
+
+### Auto backup
+Enable scheduled backup (daily/weekly at a set time). If the PC was off at the scheduled time, NovaPOS retries on next startup.
+
+### Google Drive sync
+Set the backup folder to your Google Drive Desktop sync folder:
+1. Install Google Drive Desktop → sign in → Mirror files mode
+2. Create `NovaPOS Backups` inside your Google Drive
+3. Settings → Backup → Browse → select that folder
+4. Every backup automatically appears in Google Drive
+
+### Access control
+The Backup tab is **only visible to admin, manager, and owner roles**.
+Cashiers see no backup option — they cannot accidentally restore or download the database.
+
+---
 ## Roadmap (Planned)
 
 - [ ] **Pricing Page** (`/Pricing`) — View/edit all product prices in a table; bulk % change by category
