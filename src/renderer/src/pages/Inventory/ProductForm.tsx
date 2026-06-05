@@ -134,6 +134,20 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
     }))
   }
 
+  // When bulk unit changes, auto-fill units_per_bulk from known presets
+  // (dozen=12, gross=144, crate=24...) so users don't have to remember counts
+  function onBulkUnitChange(unit: string) {
+    const preset = BULK_UNIT_PRESETS[unit]
+    setD(prev => ({
+      ...prev,
+      bulk_unit: unit,
+      ...(preset ? {
+        units_per_bulk: preset,
+        cost_price: prev.bulk_buying_price > 0 ? prev.bulk_buying_price / preset : prev.cost_price,
+      } : {}),
+    }))
+  }
+
   // ── Opening stock: enter as bulk count ───────────────────
   function onBulkStockChange(bulks: number) {
     setBulkStockQty(bulks)
@@ -309,7 +323,7 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                       <select
                         className="input"
                         value={d.bulk_unit}
-                        onChange={e => set('bulk_unit', e.target.value)}
+                        onChange={e => onBulkUnitChange(e.target.value)}
                       >
                         {BULK_UNITS.map(u => <option key={u}>{u}</option>)}
                       </select>
@@ -706,8 +720,9 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                             <th className="pb-2 text-left text-xs text-slate-500">Date</th>
                             <th className="pb-2 text-left text-xs text-slate-500">Cost</th>
                             <th className="pb-2 text-left text-xs text-slate-500">Mode</th>
+                            <th className="pb-2 text-left text-xs text-slate-500">Supplier</th>
                             <th className="pb-2 text-left text-xs text-slate-500">Qty</th>
-                            <th className="pb-2 text-left text-xs text-slate-500">By</th>
+                            <th className="pb-2 text-left text-xs text-slate-500">Ref / By</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -720,8 +735,13 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                               <td className="py-1.5">
                                 <span className="badge bg-slate-100 text-slate-600 text-xs">{h.sell_unit}</span>
                               </td>
+                              <td className="py-1.5 text-xs text-slate-500">{h.supplier_name || '—'}</td>
                               <td className="py-1.5 text-xs text-slate-500">{h.qty_bought || '—'}</td>
-                              <td className="py-1.5 text-xs text-slate-500">{h.recorder_name || '—'}</td>
+                              <td className="py-1.5 text-xs text-slate-500">
+                                {h.invoice_ref
+                                  ? <span className="text-blue-600 font-medium">{h.invoice_ref}</span>
+                                  : (h.recorder_name || '—')}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
