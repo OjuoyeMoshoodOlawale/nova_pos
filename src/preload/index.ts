@@ -64,8 +64,11 @@ const api = {
     create:      (d: unknown)              => invoke(CH.PRODUCT_CREATE, d),
     update:      (id: number, d: unknown)  => invoke(CH.PRODUCT_UPDATE, id, d),
     archive:     (id: number)              => invoke(CH.PRODUCT_ARCHIVE, id),
-    getLowStock: ()                        => invoke(CH.PRODUCT_LOW_STOCK),
-    bulkImport:  (rows: unknown[], uid: number) => invoke(CH.PRODUCT_BULK_IMPORT, rows, uid),
+    getLowStock:        ()                        => invoke(CH.PRODUCT_LOW_STOCK),
+    bulkImport:         (rows: unknown[], uid: number) => invoke(CH.PRODUCT_BULK_IMPORT, rows, uid),
+    receiveStock:       (input: unknown)          => invoke('products:receiveStock', input),
+    priceHistory:       (id: number)              => invoke('products:priceHistory', id),
+    priceChangeHistory: (id: number)              => invoke('products:priceChangeHistory', id),
   },
 
   // ── Customers ────────────────────────────────────────
