@@ -48,6 +48,8 @@ const api = {
     // backupDir is system-fixed; users only configure the GDrive sync folder
     backupLocal:   (opts: { gdriveDir?: string } = {}) =>
                                                   invoke('settings:backupLocal', opts),
+    // Wipes the live DB — double-confirmed in main process via native dialog
+    resetDatabase: (confirm: string) => invoke('settings:resetDatabase', confirm),
   },
 
   // ── Network ────────────────────────────────────────────
