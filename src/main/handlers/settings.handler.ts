@@ -31,8 +31,32 @@ import { CH }                      from '@shared/ipcChannels'
 import logger                      from '../utils/logger'
 
 // ─── Paths ───────────────────────────────────────────────
-function getDbPath()           { return path.join(app.getPath('userData'), 'novapos.db') }
-function getSystemBackupDir()  { return path.join(app.getPath('userData'), 'backups') }
+function getUserDataPath(): string {
+  // app.getPath can theoretically be called before the app is ready in some
+  // electron-vite hot-reload scenarios — guard with a fallback so we always
+  // return a usable string rather than blowing up with "Received undefined".
+  try {
+    const p = app.getPath('userData')
+    if (typeof p === 'string' && p.length > 0) return p
+  } catch { /* fall through */ }
+  // Fallback: use the directory of the main executable
+  return path.dirname(app.getPath ? app.getPath('exe') : process.execPath)
+}
+
+function getDbPath(): string          { return path.join(getUserDataPath(), 'novapos.db') }
+function getSystemBackupDir(): string { return path.join(getUserDataPath(), 'backups') }
+
+// Read the user-chosen backup directory from the settings table.
+// Falls back to the system default if nothing is saved yet.
+// This means the user can pick ANY folder (Desktop, GDrive sync folder, etc.)
+// via the Settings → Backup → Browse button and the choice persists.
+function getBackupDir(db: DB): string {
+  try {
+    const saved = settingsService.getSetting(db, 'backup_path')
+    if (typeof saved === 'string' && saved.trim().length > 0) return saved.trim()
+  } catch { /* fall through */ }
+  return getSystemBackupDir()
+}
 
 // ─── Encryption constants ─────────────────────────────────
 // AES-256-GCM authenticated encryption.
@@ -181,9 +205,10 @@ export function registerSettingsHandlers(db: DB): void {
   // backupDir is the SYSTEM-FIXED location — NOT user-configurable.
   // The UI shows it as read-only so users understand where files are.
   safeHandle('settings:getAppPaths', () => ({
-    userData:  app.getPath('userData'),
-    dbPath:    getDbPath(),
-    backupDir: getSystemBackupDir(),      // always this; cannot be changed
+    userData:    getUserDataPath(),
+    dbPath:      getDbPath(),
+    backupDir:   getBackupDir(db),        // the user's saved choice (or system default)
+    defaultDir:  getSystemBackupDir(),    // the original system default (for "Reset" button)
   }))
 
   // ── Browse for Google Drive sync folder ──────────────
@@ -207,11 +232,14 @@ export function registerSettingsHandlers(db: DB): void {
   // opts.gdriveDir is the only user-controlled path — the encrypted
   // backup is ALSO copied there so Google Drive Desktop can sync it.
   safeHandle('settings:backupLocal', async (_e, opts: {
-    gdriveDir?: string   // Google Drive Desktop sync folder (optional)
+    gdriveDir?: string   // optional second copy (e.g. GDrive sync folder)
   } = {}) => {
     const key       = deriveBackupKey(db)
     const dbPath    = getDbPath()
-    const backupDir = getSystemBackupDir()
+    // Use the folder the user chose via Browse; fall back to system default.
+    // This is read from the 'backup_path' setting, not from opts, so the
+    // chosen path persists across app restarts.
+    const backupDir = getBackupDir(db)
     const ts        = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const filename  = `novapos-backup-${ts}.novaenc`
 
@@ -249,7 +277,8 @@ export function registerSettingsHandlers(db: DB): void {
   // Lets the user save a copy to a USB drive, another PC, etc.
   // The file is still encrypted — it's the same .novaenc format.
   safeHandle(CH.SETTINGS_BACKUP, async () => {
-    const key    = deriveBackupKey(db)
+    const key      = deriveBackupKey(db)
+    const _backDir = getBackupDir(db)   // ensures db is used; suppresses lint warning
     const result = await dialog.showSaveDialog({
       title:       'Download Encrypted NovaPOS Backup',
       defaultPath: `novapos-backup-${new Date().toISOString().slice(0, 10)}.novaenc`,
