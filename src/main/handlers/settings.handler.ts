@@ -30,32 +30,60 @@ import { testEmail, performBackup } from '../mailer/mailerService'
 import { CH }                      from '@shared/ipcChannels'
 import logger                      from '../utils/logger'
 
-// ─── Paths ───────────────────────────────────────────────
-function getUserDataPath(): string {
-  // app.getPath can theoretically be called before the app is ready in some
-  // electron-vite hot-reload scenarios — guard with a fallback so we always
-  // return a usable string rather than blowing up with "Received undefined".
+// ─── Safe path resolution ─────────────────────────────────
+// NEVER call app.getPath twice — if the first call returns undefined
+// or throws, calling it again for 'exe' also fails and then
+// path.dirname(undefined) gives the confusing "Received undefined" error.
+// Instead, fall through to process.env / process.execPath which are
+// ALWAYS available as real strings.
+
+function safeUserDataPath(): string {
+  // 1 — Electron app.getPath (the correct path)
   try {
     const p = app.getPath('userData')
     if (typeof p === 'string' && p.length > 0) return p
   } catch { /* fall through */ }
-  // Fallback: use the directory of the main executable
-  return path.dirname(app.getPath ? app.getPath('exe') : process.execPath)
+
+  // 2 — Windows %APPDATA%
+ova-pos
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || process.env.LOCALAPPDATA || ''
+    if (appdata) return path.join(appdata, 'nova-pos')
+  }
+
+  // 3 — macOS ~/Library/Application Support/nova-pos
+  if (process.platform === 'darwin') {
+    const home = process.env.HOME || ''
+    if (home) return path.join(home, 'Library', 'Application Support', 'nova-pos')
+  }
+
+  // 4 — Linux ~/.config/nova-pos
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  if (home) return path.join(home, '.config', 'nova-pos')
+
+  // 5 — Absolute last resort: next to the executable
+  return path.join(path.dirname(process.execPath), 'nova-pos-data')
 }
 
-function getDbPath(): string          { return path.join(getUserDataPath(), 'novapos.db') }
-function getSystemBackupDir(): string { return path.join(getUserDataPath(), 'backups') }
+function getDbPath(): string { return path.join(safeUserDataPath(), 'novapos.db') }
 
-// Read the user-chosen backup directory from the settings table.
-// Falls back to the system default if nothing is saved yet.
-// This means the user can pick ANY folder (Desktop, GDrive sync folder, etc.)
-// via the Settings → Backup → Browse button and the choice persists.
-function getBackupDir(db: DB): string {
+// Reads the user-chosen backup folder from the settings table.
+// Falls back through three options so we never return undefined.
+function resolveBackupDir(db: DB): string {
+  // Option A — user-saved setting (e.g. C:\Users\USER\Desktop\backup)
   try {
-    const saved = settingsService.getSetting(db, 'backup_path')
-    if (typeof saved === 'string' && saved.trim().length > 0) return saved.trim()
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'backup_path'").get() as any
+    const v = row?.value
+    if (typeof v === 'string' && v.trim().length > 0) return v.trim()
   } catch { /* fall through */ }
-  return getSystemBackupDir()
+
+  // Option B — userData/backups
+  try {
+    return path.join(safeUserDataPath(), 'backups')
+  } catch { /* fall through */ }
+
+  // Option C — next to the exe
+  return path.join(path.dirname(process.execPath), 'nova-pos-backups')
 }
 
 // ─── Encryption constants ─────────────────────────────────
@@ -205,10 +233,10 @@ export function registerSettingsHandlers(db: DB): void {
   // backupDir is the SYSTEM-FIXED location — NOT user-configurable.
   // The UI shows it as read-only so users understand where files are.
   safeHandle('settings:getAppPaths', () => ({
-    userData:    getUserDataPath(),
-    dbPath:      getDbPath(),
-    backupDir:   getBackupDir(db),        // the user's saved choice (or system default)
-    defaultDir:  getSystemBackupDir(),    // the original system default (for "Reset" button)
+    userData:   safeUserDataPath(),
+    dbPath:     getDbPath(),
+    backupDir:  resolveBackupDir(db),  // user-saved choice or system default
+    defaultDir: path.join(safeUserDataPath(), 'backups'),
   }))
 
   // ── Browse for Google Drive sync folder ──────────────
@@ -239,7 +267,7 @@ export function registerSettingsHandlers(db: DB): void {
     // Use the folder the user chose via Browse; fall back to system default.
     // This is read from the 'backup_path' setting, not from opts, so the
     // chosen path persists across app restarts.
-    const backupDir = getBackupDir(db)
+    const backupDir = resolveBackupDir(db)
     const ts        = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const filename  = `novapos-backup-${ts}.novaenc`
 
@@ -278,7 +306,7 @@ export function registerSettingsHandlers(db: DB): void {
   // The file is still encrypted — it's the same .novaenc format.
   safeHandle(CH.SETTINGS_BACKUP, async () => {
     const key      = deriveBackupKey(db)
-    const _backDir = getBackupDir(db)   // ensures db is used; suppresses lint warning
+    // (db is used below for deriveBackupKey)
     const result = await dialog.showSaveDialog({
       title:       'Download Encrypted NovaPOS Backup',
       defaultPath: `novapos-backup-${new Date().toISOString().slice(0, 10)}.novaenc`,
