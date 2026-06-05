@@ -1,22 +1,28 @@
 // src/main/handlers/product.handler.ts
 import type { DB } from '../database/connection'
-import { receiveStock, safeHandle } from '../utils/safeHandle'
+import { safeHandle }      from '../utils/safeHandle'
 import * as productService from '../services/productService'
-import { receiveStock, CH } from '@shared/ipcChannels'
+import { CH }              from '@shared/ipcChannels'
 
 export function registerProductHandlers(db: DB): void {
+
   safeHandle(CH.PRODUCT_ALL,         ()              => productService.getAllProducts(db))
   safeHandle(CH.PRODUCT_SEARCH,      (_e, q: string) => productService.searchProducts(db, q))
   safeHandle(CH.PRODUCT_BARCODE,     (_e, b: string) => productService.findByBarcode(db, b))
-  safeHandle(CH.PRODUCT_GET,         (_e, id: number)=> productService.getProductById(db, id))
-  safeHandle(CH.PRODUCT_CREATE,      (_e, dto)       => productService.createProduct(db, dto))
-  safeHandle(CH.PRODUCT_UPDATE,      (_e, id, dto)   => productService.updateProduct(db, id, dto))
-  safeHandle(CH.PRODUCT_ARCHIVE,     (_e, id: number)=> productService.archiveProduct(db, id))
+  safeHandle(CH.PRODUCT_GET,         (_e, id:number) => productService.getProductById(db, id))
+  safeHandle(CH.PRODUCT_CREATE,      (_e, d: unknown) => productService.createProduct(db, d as any))
+  safeHandle(CH.PRODUCT_UPDATE,      (_e, id:number, d:unknown) => productService.updateProduct(db, id, d as any))
+  safeHandle(CH.PRODUCT_ARCHIVE,     (_e, id:number) => productService.archiveProduct(db, id))
   safeHandle(CH.PRODUCT_LOW_STOCK,   ()              => productService.getLowStockProducts(db))
-  safeHandle(CH.PRODUCT_BULK_IMPORT, (_e, rows, uid) => productService.bulkImportProducts(db, rows, uid))
+  safeHandle(CH.PRODUCT_BULK_IMPORT, (_e, rows:unknown[], uid:number) => productService.bulkImportProducts(db, rows as any[], uid))
 
+  // ── Receive stock (purchase receipt) ─────────────────
+  safeHandle('products:receiveStock', (_e, input: unknown) => {
+    productService.receiveStock(db, input as any)
+  })
+
+  // ── Price history ─────────────────────────────────────
   safeHandle('products:priceHistory', (_e, productId: number) => {
-    const db = getDb()
     return db.prepare(`
       SELECT h.*, u.full_name AS recorder_name
       FROM purchase_price_history h
@@ -26,29 +32,14 @@ export function registerProductHandlers(db: DB): void {
     `).all([productId])
   })
 
-  safeHandle('products:getLowStock', () => {
-    const db = getDb()
-    const rows = db.prepare(
-      'SELECT * FROM products WHERE is_active=1 AND stock_qty <= reorder_level ORDER BY stock_qty ASC'
-    ).all()
-    return rows
-  })
-
-  safeHandle('products:receiveStock', (_e, input) => {
-    const { receiveStock } = require('../services/productService')
-    receiveStock(getDb(), input)
-  })
-
-
+  // ── Selling price change history ──────────────────────
   safeHandle('products:priceChangeHistory', (_e, productId: number) => {
     return db.prepare(`
-      SELECT h.*, u.full_name AS changer_name, p.name AS product_name
+      SELECT h.*, u.full_name AS changer_name
       FROM selling_price_history h
       LEFT JOIN users u ON h.changed_by = u.id
-      JOIN products p ON h.product_id = p.id
       WHERE h.product_id = ?
       ORDER BY h.changed_at DESC LIMIT 50
     `).all([productId])
   })
-
 }

@@ -314,6 +314,12 @@ export default function StockReceiveModal({product: initProduct, onClose, onSave
             {/* Step 4 — Pricing Decision */}
             <section>
               <p className="step-label">④ Pricing Decision</p>
+              {product.selling_price === 0 && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800 mb-3 flex items-start gap-2">
+                  <span className="text-green-500 flex-shrink-0">★</span>
+                  <span>New product with no price yet — set your selling price below. It will apply immediately.</span>
+                </div>
+              )}
 
               {/* 3-mode selector — shown always but with context when cost changed */}
               {costChanged && existingStock > 0 && (
