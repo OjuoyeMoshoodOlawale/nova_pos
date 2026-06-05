@@ -34,6 +34,7 @@ export default function SettingsPage() {
   const [printers, setPrinters] = useState<string[]>([])
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [appPaths, setAppPaths] = useState<any>(null)
   // Category edit state
   const [catForm, setCatForm] = useState<{id?:number;name:string;color:string}|null>(null)
 
@@ -49,6 +50,7 @@ export default function SettingsPage() {
       if (pr.success)   setPrinters(pr.data || [])
       if (cats.success) setCategories(cats.data || [])
     })
+    window.api.settings.getAppPaths().then((r:any) => { if (r.success) setAppPaths(r.data) })
   }, [])
 
   async function saveProfile() {
@@ -368,50 +370,115 @@ export default function SettingsPage() {
           {/* ── BACKUP ── */}
           {tab==='backup' && (
             <div className="space-y-4">
-              <h2 className="text-lg font-bold text-slate-800">Backup & Restore</h2>
+              <h2 className="text-lg font-bold text-slate-800">Backup &amp; Restore</h2>
+
+              {/* DB path shown dynamically — read from Electron at runtime */}
+              <div className="card bg-slate-50 space-y-2">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Database Location</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono bg-white border border-slate-200 rounded px-3 py-2 text-slate-700 truncate">
+                    {appPaths?.dbPath || 'Loading…'}
+                  </code>
+                  <button onClick={()=>{const d=appPaths?.dbPath?.replace(/[\\/\\\\][^\\/\\\\]+$/,'');if(d)window.api.settings.openFolder(d)}}
+                    className="btn-secondary text-xs py-1.5 flex-shrink-0">Open</button>
+                </div>
+                <p className="text-xs text-slate-400">Default backup folder: <code className="text-slate-500">{appPaths?.backupDir||'…'}</code></p>
+              </div>
+
+              {/* Auto-backup schedule */}
               <div className="card space-y-4">
+                <p className="text-sm font-semibold text-slate-800">Auto Backup</p>
                 <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={S('backup_enabled')==='true'} onChange={e=>saveSetting('backup_enabled',e.target.checked?'true':'false')}/>
-                  <span className="font-medium text-sm">Enable automatic backups</span>
+                  <input type="checkbox" checked={S('backup_enabled')==='true'}
+                    onChange={e=>saveSetting('backup_enabled',e.target.checked?'true':'false')}/>
+                  <span className="text-sm font-medium">Enable scheduled backup</span>
                 </label>
                 {S('backup_enabled')==='true' && <>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="label">Schedule</label>
+                    <div><label className="label">Frequency</label>
                       <select className="input" value={S('backup_schedule')||'daily'} onChange={e=>saveSetting('backup_schedule',e.target.value)}>
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
                       </select></div>
                     <div><label className="label">At time</label>
                       <input type="time" className="input" value={S('backup_time')||'23:00'} onChange={e=>saveSetting('backup_time',e.target.value)}/></div>
                   </div>
-                  <div><label className="label">Destination</label>
-                    <select className="input" value={S('backup_destination')||'local'} onChange={e=>saveSetting('backup_destination',e.target.value)}>
-                      <option value="local">Local Folder</option>
-                      <option value="email">Email (SMTP)</option>
-                      <option value="googledrive">Google Drive Folder (local sync)</option>
-                      <option value="both">Local + Email</option>
-                    </select></div>
-                  {(S('backup_destination')==='email'||S('backup_destination')==='both') && (
-                    <div><label className="label">Backup Email</label>
-                      <input type="email" className="input" value={S('backup_email')} onChange={e=>saveSetting('backup_email',e.target.value)} placeholder="backup@gmail.com"/></div>
-                  )}
-                  {S('backup_destination')==='googledrive' && (
-                    <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-700 space-y-1">
-                      <p className="font-medium">Google Drive via local sync folder</p>
-                      <p>Set the backup folder to your Google Drive sync directory on this PC, e.g.</p>
-                      <code className="block bg-blue-100 px-2 py-1 rounded text-xs mt-1">C:\Users\USER\Google Drive\NovaPOS Backups</code>
-                      <p className="text-xs mt-1">Files saved there are automatically synced to Drive by the Google Drive desktop app.</p>
-                    </div>
-                  )}
-                  {(S('backup_destination')==='local'||S('backup_destination')==='googledrive'||S('backup_destination')==='both') && (
-                    <div><label className="label">Backup Folder Path</label>
-                      <input className="input font-mono text-xs" value={S('backup_path')} onChange={e=>saveSetting('backup_path',e.target.value)} placeholder="e.g. C:\Backups\NovaPOS"/></div>
-                  )}
+                  <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                    ⚡ If the PC was off or offline at backup time, NovaPOS retries automatically the moment it comes back online.
+                  </p>
                 </>}
-                <div className="flex gap-3 pt-2 border-t border-slate-100">
-                  <button onClick={()=>window.api.settings.backupNow().then((r:any)=>{if(r.success)addToast('success','Backup saved: '+r.data);else addToast('error',r.error||'Failed')})} className="btn-secondary flex-1">Backup Now</button>
-                  <button onClick={()=>window.api.settings.restore()} className="btn-secondary flex-1">Restore Backup</button>
+              </div>
+
+              {/* Local backup folder */}
+              <div className="card space-y-3">
+                <p className="text-sm font-semibold text-slate-800">Local Backup Folder</p>
+                <p className="text-xs text-slate-500">Files are saved as timestamped .db copies. Last 30 kept automatically.</p>
+                <div className="flex gap-2">
+                  <input className="input flex-1 font-mono text-xs"
+                    value={S('backup_path')||(appPaths?.backupDir||'')}
+                    onChange={e=>saveSetting('backup_path',e.target.value)}
+                    placeholder={appPaths?.backupDir||'Loading…'}/>
+                  <button onClick={async()=>{
+                    const r=await window.api.settings.chooseFolder()
+                    if(r.success&&r.data) saveSetting('backup_path',r.data)
+                  }} className="btn-secondary text-xs py-2 flex-shrink-0">Browse</button>
+                </div>
+                {(S('backup_path')||appPaths?.backupDir) && (
+                  <button onClick={()=>window.api.settings.openFolder(S('backup_path')||appPaths?.backupDir)}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                    📁 Open backup folder
+                  </button>
+                )}
+              </div>
+
+              {/* Google Drive sync folder */}
+              <div className="card space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Google Drive Sync <span className="font-normal text-slate-400 text-xs">(optional)</span></p>
+                  <p className="text-xs text-slate-500 mt-0.5">After every backup, NovaPOS also copies the file to this folder. Google Drive Desktop then syncs it to the cloud.</p>
+                </div>
+                <details className="text-xs bg-blue-50 border border-blue-100 rounded-lg">
+                  <summary className="px-3 py-2 cursor-pointer font-medium text-blue-700">📋 How to set this up</summary>
+                  <ol className="px-4 py-3 space-y-1 list-decimal list-inside text-slate-600">
+                    <li>Install <strong>Google Drive Desktop</strong> and sign in</li>
+                    <li>Choose <strong>Mirror files</strong> mode in Drive settings</li>
+                    <li>Create a folder <code className="bg-blue-100 px-1 rounded">NovaPOS Backups</code> inside your Google Drive</li>
+                    <li>Click Browse below and select that folder</li>
+                  </ol>
+                  <p className="px-3 pb-2 text-blue-500">Example: <code>C:\Users\YOUR_NAME\Google Drive\My Drive\NovaPOS Backups</code></p>
+                </details>
+                <div className="flex gap-2">
+                  <input className="input flex-1 font-mono text-xs"
+                    value={S('gdrive_backup_path')||''}
+                    onChange={e=>saveSetting('gdrive_backup_path',e.target.value)}
+                    placeholder="Leave blank to skip"/>
+                  <button onClick={async()=>{
+                    const r=await window.api.settings.chooseFolder()
+                    if(r.success&&r.data) saveSetting('gdrive_backup_path',r.data)
+                  }} className="btn-secondary text-xs py-2 flex-shrink-0">Browse</button>
+                </div>
+              </div>
+
+              {/* Actions + last backup */}
+              <div className="card space-y-3">
+                {S('last_backup_at') && (
+                  <p className="text-xs text-slate-500">
+                    <span className="text-green-500 mr-1">✓</span>
+                    Last backup: <strong>{new Date(S('last_backup_at')).toLocaleString()}</strong>
+                    {S('last_backup_file') && <code className="ml-2 text-[10px] text-slate-400">{S('last_backup_file').split(/[/\\]/).pop()}</code>}
+                  </p>
+                )}
+                <div className="flex gap-3">
+                  <button onClick={async()=>{
+                    const backupDir=S('backup_path')||appPaths?.backupDir
+                    if(!backupDir){addToast('error','Set a backup folder first');return}
+                    const r=await window.api.settings.backupLocal({backupDir,gdriveDir:S('gdrive_backup_path')||undefined})
+                    if(r.success){
+                      addToast('success',`Backup saved${r.data?.gdriveCopied?' + GDrive':''}: ${r.data?.filename}`)
+                      setSettings((p:any)=>({...p,last_backup_at:new Date().toISOString(),last_backup_file:r.data?.filePath}))
+                    } else addToast('error',r.error||'Backup failed')
+                  }} className="btn-primary flex-1">💾 Backup Now</button>
+                  <button onClick={()=>window.api.settings.restore()} className="btn-secondary flex-1">↩ Restore</button>
                 </div>
               </div>
             </div>
