@@ -1,8 +1,8 @@
 // src/main/handlers/product.handler.ts
 import type { DB } from '../database/connection'
-import { safeHandle } from '../utils/safeHandle'
+import { receiveStock, safeHandle } from '../utils/safeHandle'
 import * as productService from '../services/productService'
-import { CH } from '@shared/ipcChannels'
+import { receiveStock, CH } from '@shared/ipcChannels'
 
 export function registerProductHandlers(db: DB): void {
   safeHandle(CH.PRODUCT_ALL,         ()              => productService.getAllProducts(db))
@@ -33,4 +33,10 @@ export function registerProductHandlers(db: DB): void {
     ).all()
     return rows
   })
+
+  safeHandle('products:receiveStock', (_e, input) => {
+    const { receiveStock } = require('../services/productService')
+    receiveStock(getDb(), input)
+  })
+
 }
