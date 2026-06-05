@@ -381,18 +381,18 @@ export default function SettingsPage() {
 
               {/* ── Encryption notice ── */}
               <div className="flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
-                <span className="text-green-600 text-xl flex-shrink-0">🔒</span>
+                <span className="text-xl flex-shrink-0">🔒</span>
                 <div>
                   <p className="text-sm font-semibold text-green-800">AES-256 Encrypted Backups</p>
                   <p className="text-xs text-green-700 mt-0.5">
-                    Every backup is encrypted with your installation's activation key.
-                    Only a NovaPOS installation activated with the same licence key can restore it.
-                    Files are safe even if someone else gets the backup file.
+                    Every backup is encrypted with your licence key. Only a NovaPOS installation
+                    activated with the same key can restore it — the file is safe even if someone
+                    else gets a copy.
                   </p>
                 </div>
               </div>
 
-              {/* ── DB file location (read-only) ── */}
+              {/* ── DB file (read-only display) ── */}
               <div className="card bg-slate-50 space-y-2">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Database File</p>
                 <div className="flex items-center gap-2">
@@ -400,144 +400,150 @@ export default function SettingsPage() {
                     {appPaths?.dbPath || 'Loading…'}
                   </code>
                   <button
-                    onClick={()=>{const d=appPaths?.dbPath?.replace(/[\\/\\\\][^\\/\\\\]+$/,'');if(d)window.api.settings.openFolder(d)}}
+                    onClick={()=>{
+                      const d = appPaths?.dbPath?.replace(/[\\/\\\\][^\\/\\\\]+$/, '')
+                      if (d) window.api.settings.openFolder(d)
+                    }}
                     className="btn-secondary text-xs py-1.5 flex-shrink-0">Open</button>
                 </div>
               </div>
 
-              {/* ── Backup folder (system-fixed, read-only) ── */}
-              <div className="card space-y-2">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                  Backup Location
-                  <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-normal normal-case tracking-normal">system managed</span>
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs font-mono bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-500 truncate select-all">
-                    {appPaths?.backupDir || 'Loading…'}
-                  </code>
-                  <button
-                    onClick={()=>{if(appPaths?.backupDir)window.api.settings.openFolder(appPaths.backupDir)}}
-                    className="btn-secondary text-xs py-1.5 flex-shrink-0">Open</button>
-                </div>
-                <p className="text-xs text-slate-400">
-                  NovaPOS controls this location — backups always go here. Last 30 files kept automatically.
-                </p>
-              </div>
-
-              {/* ── Google Drive Desktop sync folder (only user-settable path) ── */}
+              {/* ── Backup folder ── */}
+              {/* The user picks this folder via Browse only — no hand-typing. */}
+              {/* Default = %APPDATA%\nova-pos\backups\                        */}
+              {/* Set it to your Google Drive sync folder for cloud backup.    */}
               <div className="card space-y-3">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">Google Drive Sync Folder</p>
+                  <p className="text-sm font-semibold text-slate-800">Backup Folder</p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    After every backup NovaPOS copies the encrypted file here.
-                    Google Drive Desktop then syncs it to the cloud automatically.
+                    Encrypted backups are saved here. Last 30 files are kept automatically.
+                    <br/>
+                    💡 Point this to your <strong>Google Drive Desktop sync folder</strong> for automatic cloud backup.
                   </p>
                 </div>
-                <details className="bg-blue-50 border border-blue-100 rounded-lg text-xs">
-                  <summary className="px-3 py-2 cursor-pointer font-medium text-blue-700">
-                    📋 How to connect Google Drive
-                  </summary>
-                  <ol className="px-4 pb-3 pt-1 space-y-1 list-decimal list-inside text-slate-600">
-                    <li>Install <strong>Google Drive Desktop</strong> on this PC</li>
-                    <li>Sign in → choose <strong>Mirror files</strong> mode</li>
-                    <li>Open your local Google Drive folder, create <code className="bg-blue-100 px-1 rounded">NovaPOS Backups</code></li>
-                    <li>Click Browse below and select that folder</li>
-                  </ol>
-                  <p className="px-4 pb-3 text-blue-500">
-                    Typical path: <code>C:\Users\NAME\Google Drive\My Drive\NovaPOS Backups</code>
-                  </p>
-                </details>
                 <div className="flex gap-2">
+                  {/* Read-only display — change only via Browse */}
                   <input
-                    className="input flex-1 font-mono text-xs"
-                    value={S('gdrive_sync_path')||''}
-                    onChange={e=>saveSetting('gdrive_sync_path',e.target.value)}
-                    placeholder="Leave blank to skip Google Drive sync"
+                    readOnly
+                    className="input flex-1 font-mono text-xs bg-slate-50 cursor-default select-all"
+                    value={S('backup_path') || (appPaths?.backupDir || appPaths?.defaultDir || '')}
+                    placeholder="Loading backup path…"
                   />
                   <button
-                    onClick={async()=>{
-                      const r=await window.api.settings.chooseFolder()
-                      if(r.success&&r.data) saveSetting('gdrive_sync_path',r.data)
+                    onClick={async () => {
+                      const r = await window.api.settings.chooseFolder()
+                      if (r.success && r.data) {
+                        await saveSetting('backup_path', r.data)
+                        // Refresh appPaths so the display updates
+                        const p = await window.api.settings.getAppPaths()
+                        if (p.success) setAppPaths(p.data)
+                        addToast('success', 'Backup folder updated')
+                      }
                     }}
-                    className="btn-secondary text-xs py-2 flex-shrink-0">Browse</button>
+                    className="btn-primary text-xs py-2 flex-shrink-0">Browse</button>
                 </div>
-                {S('gdrive_sync_path') && (
-                  <button
-                    onClick={()=>window.api.settings.openFolder(S('gdrive_sync_path'))}
-                    className="text-xs text-blue-600 hover:text-blue-800">📁 Open sync folder</button>
-                )}
+                <div className="flex items-center gap-3">
+                  {(S('backup_path') || appPaths?.backupDir) && (
+                    <button
+                      onClick={() => window.api.settings.openFolder(S('backup_path') || appPaths?.backupDir)}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                      📁 Open folder
+                    </button>
+                  )}
+                  {S('backup_path') && (
+                    <button
+                      onClick={async () => {
+                        await saveSetting('backup_path', '')
+                        const p = await window.api.settings.getAppPaths()
+                        if (p.success) setAppPaths(p.data)
+                        addToast('success', 'Reset to default location')
+                      }}
+                      className="text-xs text-slate-400 hover:text-slate-600">
+                      ↺ Reset to default
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* ── Auto-backup schedule ── */}
               <div className="card space-y-4">
                 <p className="text-sm font-semibold text-slate-800">Auto Backup</p>
                 <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={S('backup_enabled')==='true'}
-                    onChange={e=>saveSetting('backup_enabled',e.target.checked?'true':'false')}/>
+                  <input type="checkbox" checked={S('backup_enabled') === 'true'}
+                    onChange={e => saveSetting('backup_enabled', e.target.checked ? 'true' : 'false')} />
                   <span className="text-sm text-slate-700">Run backup automatically</span>
                 </label>
-                {S('backup_enabled')==='true' && (
+                {S('backup_enabled') === 'true' && (
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="label">Frequency</label>
-                      <select className="input" value={S('backup_schedule')||'daily'}
-                        onChange={e=>saveSetting('backup_schedule',e.target.value)}>
+                    <div>
+                      <label className="label">Frequency</label>
+                      <select className="input" value={S('backup_schedule') || 'daily'}
+                        onChange={e => saveSetting('backup_schedule', e.target.value)}>
                         <option value="daily">Daily</option>
                         <option value="weekly">Weekly</option>
-                      </select></div>
-                    <div><label className="label">At time</label>
-                      <input type="time" className="input" value={S('backup_time')||'23:00'}
-                        onChange={e=>saveSetting('backup_time',e.target.value)}/></div>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">At time</label>
+                      <input type="time" className="input" value={S('backup_time') || '23:00'}
+                        onChange={e => saveSetting('backup_time', e.target.value)} />
+                    </div>
                   </div>
                 )}
                 <p className="text-xs text-slate-400">
-                  ⚡ If the PC was off at backup time, NovaPOS retries automatically on next startup.
+                  ⚡ If the PC was off or offline at backup time, NovaPOS retries on next startup.
                 </p>
               </div>
 
-              {/* ── Actions + last backup ── */}
+              {/* ── Actions ── */}
               <div className="card space-y-3">
                 {S('last_backup_at') && (
                   <div className="flex items-center gap-2 text-xs text-slate-500">
-                    <span className="text-green-500">🔒✓</span>
-                    Last encrypted backup:&nbsp;
-                    <strong>{new Date(S('last_backup_at')).toLocaleString()}</strong>
+                    <span className="text-green-500">🔒 ✓</span>
+                    Last backup: <strong>{new Date(S('last_backup_at')).toLocaleString()}</strong>
                     {S('last_backup_file') && (
-                      <code className="text-[10px] text-slate-400">{S('last_backup_file').split(/[/\\]/).pop()}</code>
+                      <code className="text-[10px] text-slate-400 ml-1">
+                        {S('last_backup_file').split(/[/\\]/).pop()}
+                      </code>
                     )}
                   </div>
                 )}
                 <div className="grid grid-cols-3 gap-2">
-                  {/* Backup Now */}
+                  {/* Backup Now — saves to the configured folder */}
                   <button
-                    onClick={async()=>{
-                      const r=await window.api.settings.backupLocal({
-                        gdriveDir: S('gdrive_sync_path')||undefined,
-                      })
-                      if(r.success){
-                        const msg=r.data?.gdriveCopied?' + synced to GDrive':''
-                        addToast('success',`🔒 Encrypted backup saved${msg}`)
-                        setSettings((p:any)=>({...p,last_backup_at:new Date().toISOString(),last_backup_file:r.data?.filePath}))
-                      } else addToast('error',r.error||'Backup failed')
+                    onClick={async () => {
+                      const r = await window.api.settings.backupLocal({})
+                      if (r.success) {
+                        addToast('success', `🔒 Backup saved: ${r.data?.filename}`)
+                        setSettings((p: any) => ({
+                          ...p,
+                          last_backup_at:   new Date().toISOString(),
+                          last_backup_file: r.data?.filePath,
+                        }))
+                      } else {
+                        addToast('error', r.error || 'Backup failed')
+                      }
                     }}
                     className="btn-primary text-xs py-2.5">🔒 Backup Now</button>
 
-                  {/* Download encrypted backup via save-as dialog */}
+                  {/* Download — save-as dialog, user picks any location */}
                   <button
-                    onClick={async()=>{
-                      const r=await window.api.settings.backup()
-                      if(r.success&&r.data) addToast('success',`Downloaded: ${r.data.split(/[/\\]/).pop()}`)
-                      else if(r.data===null) {/* cancelled */}
-                      else addToast('error',r.error||'Failed')
+                    onClick={async () => {
+                      const r = await window.api.settings.backup()
+                      if (r.success && r.data)
+                        addToast('success', `Downloaded: ${r.data.split(/[/\\]/).pop()}`)
+                      else if (r.data !== null && !r.success)
+                        addToast('error', r.error || 'Failed')
                     }}
                     className="btn-secondary text-xs py-2.5">⬇ Download</button>
 
-                  {/* Restore — accepts .novaenc or legacy .db */}
+                  {/* Restore — accepts .novaenc (encrypted) or .db (legacy) */}
                   <button
-                    onClick={()=>window.api.settings.restore()}
+                    onClick={() => window.api.settings.restore()}
                     className="btn-secondary text-xs py-2.5">↩ Restore</button>
                 </div>
                 <p className="text-xs text-slate-400">
-                  Restore accepts <code>.novaenc</code> (encrypted) or legacy <code>.db</code> files.
+                  Restore accepts encrypted <code>.novaenc</code> or legacy <code>.db</code> files.
                   To restore on a new machine, activate with the same licence key first.
                 </p>
               </div>
