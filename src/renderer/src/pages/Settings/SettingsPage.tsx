@@ -559,6 +559,44 @@ export default function SettingsPage() {
                     <p className="text-xs text-slate-500">Disable for maximum security</p></div>
                 </label>
               </div>
+
+              {/* ── Database Reset (admin only) ── */}
+              {['admin','owner'].includes(user?.role||'') && (
+                <div className="card border-red-200 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-red-700">⚠️ Delete Database (Fresh Start)</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Permanently deletes ALL data — sales, products, customers, staff, settings.
+                      The app restarts with an empty database. Use when setting up a new installation
+                      from scratch or wiping a demo/test database.
+                    </p>
+                  </div>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 space-y-1">
+                    <p><strong>Before deleting:</strong></p>
+                    <p>① Go to Backup tab → Backup Now (save an encrypted copy)</p>
+                    <p>② Export any reports you need to keep</p>
+                    <p>③ Then return here and click Delete</p>
+                  </div>
+                  <button
+                    onClick={async()=>{
+                      const typed = window.prompt(
+                        'Type DELETE to confirm you want to erase all data:\n\n' +
+                        'This will delete every sale, product, customer, and setting.\n' +
+                        'The app restarts fresh. This cannot be undone.'
+                      )
+                      if (typed !== 'DELETE') {
+                        if (typed !== null) addToast('error','You must type DELETE exactly to confirm')
+                        return
+                      }
+                      const r = await window.api.settings.resetDatabase('RESET')
+                      if (!r.success) addToast('error', r.error || 'Reset failed')
+                      // On success the app restarts — this code never runs
+                    }}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-xl text-sm transition">
+                    🗑️ Delete All Data &amp; Start Fresh
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
