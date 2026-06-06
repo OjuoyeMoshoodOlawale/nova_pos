@@ -180,7 +180,7 @@ function decryptBackup(blob: Buffer, key: Buffer): Buffer {
 }
 
 /** Prune .novaenc files in a directory, keeping the newest `keep` files. */
-function pruneOldBackups(dir: string, keep = 30) {
+function pruneOldBackups(dir: string, keep: number) {
   try {
     const files = fs.readdirSync(dir)
       .filter(f => f.startsWith('novapos-backup-') && f.endsWith('.novaenc'))
@@ -297,7 +297,8 @@ export function registerSettingsHandlers(db: DB): void {
       }
     }
 
-    pruneOldBackups(backupDir)
+    const keepCount = Math.max(1, parseInt(settingsService.getSetting(db, 'backup_keep_count') || '30') || 30)
+    pruneOldBackups(backupDir, keepCount)
     return { filePath: destPath, filename, gdriveCopied }
   })
 
