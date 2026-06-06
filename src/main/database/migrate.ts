@@ -70,6 +70,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('lan_server_port',     '3977'),
   ('lan_secret',          ''),
   ('dev_login_enabled',   'true'),
+  ('backup_keep_count',   '30'),
   ('app_version',         '1.0.0');
 
 -- ─── USERS ───────────────────────────────────────────
