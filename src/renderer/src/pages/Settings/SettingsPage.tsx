@@ -490,6 +490,25 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 )}
+                {/* How many backup files to keep */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-700 font-medium">Keep last</p>
+                    <p className="text-xs text-slate-400">Oldest files beyond this limit are deleted automatically</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min="1" max="365" step="1"
+                      className="input w-20 text-center font-mono"
+                      value={S('backup_keep_count') || '30'}
+                      onChange={e => {
+                        const n = Math.max(1, Math.min(365, parseInt(e.target.value) || 30))
+                        saveSetting('backup_keep_count', String(n))
+                      }}
+                    />
+                    <span className="text-sm text-slate-500 font-medium">backups</span>
+                  </div>
+                </div>
                 <p className="text-xs text-slate-400">
                   ⚡ If the PC was off or offline at backup time, NovaPOS retries on next startup.
                 </p>
