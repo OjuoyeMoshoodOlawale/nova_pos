@@ -192,13 +192,14 @@ export async function performBackup(): Promise<BackupResult> {
     setSetting(db, 'last_backup_file', savedPath)
   } catch { /* non-fatal */ }
 
-  // ── Prune old .novaenc backups (keep 30) ─────────────
+  // ── Prune old .novaenc backups (keep user-configured count) ──
   try {
+    const keepN = Math.max(1, parseInt(getSetting(db, 'backup_keep_count') || '30') || 30)
     const files = fs.readdirSync(backupDir)
       .filter(f => f.startsWith('novapos-backup-') && f.endsWith('.novaenc'))
       .sort()
-    if (files.length > 30) {
-      files.slice(0, files.length - 30).forEach(f => {
+    if (files.length > keepN) {
+      files.slice(0, files.length - keepN).forEach(f => {
         try { fs.unlinkSync(path.join(backupDir, f)) } catch {}
         logger.info(`[Backup] Pruned old backup: ${f}`)
       })
