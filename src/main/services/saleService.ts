@@ -33,18 +33,42 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
   const taxInclusiveApplied = taxProfile?.tax_inclusive ?  1  : 0
 
   const saleId = withTx(db, () => {
+    // ── Build full item snapshot BEFORE inserting ─────────
+    // items_json stores everything needed to reprint/audit this sale
+    // even if products are renamed, repriced, or deleted later.
+    // total_cost_amount = what the goods cost us at the moment of sale.
+    let totalCostAmount = 0
+    const itemSnapshots = input.items.map(item => {
+      const prod = db.prepare('SELECT cost_price FROM products WHERE id = ?')
+        .get([item.product_id]) as { cost_price: number } | undefined
+      const costPrice = prod?.cost_price ?? 0
+      totalCostAmount += costPrice * item.quantity
+      return {
+        product_id:   item.product_id,
+        product_name: item.product_name,
+        unit_price:   item.unit_price,   // selling price at moment of sale
+        cost_price:   costPrice,         // buying price at moment of sale
+        quantity:     item.quantity,
+        discount_pct: item.discount_pct,
+        line_total:   item.line_total,
+        sell_mode:    (item as any).sell_mode ?? 'unit',
+      }
+    })
+
     const saleResult = db.prepare(`
       INSERT INTO sales (
         receipt_no, customer_id, served_by,
         subtotal, discount_pct, discount_amt,
         tax_amount, total_amount, amount_paid, change_given, status,
-        tax_rate_applied, tax_inclusive_applied
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?)
+        tax_rate_applied, tax_inclusive_applied,
+        items_json, total_cost_amount
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)
     `).run([
       receiptNo, input.customer_id ?? null, input.served_by,
       subtotal, input.discount_pct, input.discount_amt,
       input.tax_amount, input.total_amount, amountPaid, change,
       taxRateApplied, taxInclusiveApplied,
+      JSON.stringify(itemSnapshots), totalCostAmount,
     ])
     const id = Number(saleResult.lastInsertRowid)
 
