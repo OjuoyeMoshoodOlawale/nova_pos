@@ -83,7 +83,7 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   data.push(divider('═'))
   if (profile.receipt_footer) data.push(t(profile.receipt_footer, false, 'center', '12px'))
   data.push(t('Thank you for your patronage!', false, 'center', '12px'))
-  data.push(t('Powered by NovaPOS', false, 'center', '10px'))
+  data.push(t('Powered by Webautomate Nigeria', false, 'center', '10px'))
   data.push(t(' ', false, 'center', '10px'))
 
   return data
