@@ -8,6 +8,60 @@ import logger from '../utils/logger'
 
 const sessions = new Map<string, SessionUser>()
 
+// ─── Login rate limiting ──────────────────────────────────
+// Brute-force protection: after MAX_FAILS consecutive failures for a
+// username, logins for that username are locked. Lock time doubles on
+// every subsequent lockout (30s → 60s → 120s … capped at 15 min).
+// In-memory is correct here: a desktop attacker who can restart the app
+// can also delete the DB — physical access is out of scope.
+const MAX_FAILS     = 5
+const BASE_LOCK_MS  = 30_000
+const MAX_LOCK_MS   = 15 * 60_000
+const loginAttempts = new Map<string, { fails: number; lockedUntil: number; lockouts: number }>()
+
+function assertNotLocked(username: string): void {
+  const rec = loginAttempts.get(username)
+  if (!rec) return
+  const remaining = rec.lockedUntil - Date.now()
+  if (remaining > 0) {
+    const secs = Math.ceil(remaining / 1000)
+    throw new Error(`Too many failed attempts. Try again in ${secs} second${secs === 1 ? '' : 's'}.`)
+  }
+}
+
+function recordLoginFail(db: DB, username: string): void {
+  const rec = loginAttempts.get(username) ?? { fails: 0, lockedUntil: 0, lockouts: 0 }
+  rec.fails += 1
+  if (rec.fails >= MAX_FAILS) {
+    rec.lockouts += 1
+    rec.lockedUntil = Date.now() + Math.min(MAX_LOCK_MS, BASE_LOCK_MS * 2 ** (rec.lockouts - 1))
+    rec.fails = 0
+    logger.warn(`[Auth] Lockout #${rec.lockouts} for username: ${username}`)
+    try {
+      db.prepare("INSERT INTO activity_log (action, detail) VALUES ('auth.lockout', ?)")
+        .run([`Username '${username}' locked after ${MAX_FAILS} failed attempts`])
+    } catch { /* non-fatal */ }
+  }
+  loginAttempts.set(username, rec)
+}
+
+function recordLoginSuccess(username: string): void {
+  loginAttempts.delete(username)
+}
+
+// ─── Credential policy ────────────────────────────────────
+// Enforced at creation/change so weak credentials never enter the DB.
+export function validatePassword(password: string): void {
+  if (!password || password.length < 6) {
+    throw new Error('Password must be at least 6 characters')
+  }
+}
+export function validatePin(pin: string): void {
+  if (!/^\d{4,6}$/.test(pin)) {
+    throw new Error('PIN must be 4 to 6 digits')
+  }
+}
+
 // ─── Password hashing ─────────────────────────────────────
 export function hashPassword(plain: string): string {
   const salt = randomBytes(16).toString('hex')
@@ -46,6 +100,9 @@ export function destroySession(token: string): void {
 
 // ─── Login ───────────────────────────────────────────────
 export function login(db: DB, username: string, password: string): SessionUser {
+  // Reject immediately if this username is in a lockout window
+  assertNotLocked(username)
+
   // Developer maintenance login (not stored in DB)
   const devEnabled = db
     .prepare("SELECT value FROM settings WHERE key = 'dev_login_enabled'")
@@ -67,8 +124,15 @@ export function login(db: DB, username: string, password: string): SessionUser {
     .prepare('SELECT * FROM users WHERE username = ? AND is_active = 1')
     .get([username]) as (User & { password_hash: string }) | undefined
 
-  if (!row) throw new Error('Invalid username or password')
-  if (!verifyPassword(password, row.password_hash)) throw new Error('Invalid username or password')
+  if (!row) {
+    recordLoginFail(db, username)
+    throw new Error('Invalid username or password')
+  }
+  if (!verifyPassword(password, row.password_hash)) {
+    recordLoginFail(db, username)
+    throw new Error('Invalid username or password')
+  }
+  recordLoginSuccess(username)
 
   logger.info(`[Auth] Login: ${username} (${row.role})`)
   return createSession({
@@ -90,6 +154,8 @@ export function getAllUsers(db: DB): User[] {
 }
 
 export function createUser(db: DB, dto: CreateUserDto): User {
+  validatePassword(dto.password)
+  if (dto.pin) validatePin(dto.pin)
   const hash    = hashPassword(dto.password)
   const pinHash = dto.pin ? hashPin(dto.pin) : null
 
@@ -114,6 +180,7 @@ export function changePassword(
     | { password_hash: string } | undefined
   if (!row) throw new Error('User not found')
   if (!verifyPassword(oldPassword, row.password_hash)) throw new Error('Incorrect current password')
+  validatePassword(newPassword)
 
   db.prepare(`UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?`)
     .run([hashPassword(newPassword), userId])
@@ -135,7 +202,7 @@ export function updateUser(
 
   if (data.full_name) { sets.push('full_name = ?'); vals.push(data.full_name) }
   if (data.role)      { sets.push('role = ?');       vals.push(data.role)      }
-  if (data.pin)       { sets.push('pin = ?');         vals.push(hashPin(data.pin)) }
+  if (data.pin)       { validatePin(data.pin); sets.push('pin = ?'); vals.push(hashPin(data.pin)) }
 
   vals.push(userId) // WHERE id = ?
   db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(vals)
