@@ -71,6 +71,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('lan_secret',          ''),
   ('dev_login_enabled',   'true'),
   ('backup_keep_count',   '30'),
+  ('auto_print_receipt',  'true'),
   ('app_version',         '1.0.0');
 
 -- ─── USERS ───────────────────────────────────────────
@@ -369,34 +370,23 @@ ALTER TABLE sales ADD COLUMN tax_inclusive_applied INTEGER DEFAULT 0;
 -- Enables reconciliation between NovaPOS purchase records and paper invoices.
 ALTER TABLE purchase_price_history ADD COLUMN invoice_ref TEXT;
 `,
-}
 
-// ─── Run migrations ───────────────────────────────────
-export function runMigrations(db: DB): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS _migrations (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      name       TEXT NOT NULL UNIQUE,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )
-  `)
+  '007_sale_snapshot_totals.sql': `
+-- ─── SALE SNAPSHOT TOTALS ────────────────────────────────
+-- Each sale stores a full JSON snapshot of its items plus the
+-- total cost (buying price) at moment of sale. Reports read these
+-- directly so changing product prices later NEVER alters history.
+ALTER TABLE sales ADD COLUMN items_json        TEXT;
+ALTER TABLE sales ADD COLUMN total_cost_amount REAL NOT NULL DEFAULT 0;
 
-  const applied = new Set(
-    (db.prepare('SELECT name FROM _migrations').all() as { name: string }[]).map((r) => r.name)
-  )
+-- Backfill cost totals for existing sales from sale_items snapshots
+UPDATE sales SET total_cost_amount = COALESCE((
+  SELECT SUM(si.cost_price * si.quantity)
+  FROM sale_items si WHERE si.sale_id = sales.id
+), 0);
 
-  let count = 0
-  for (const [name, sql] of Object.entries(MIGRATIONS).sort()) {
-    if (applied.has(name)) continue
-    logger.info(`[Migrate] Applying: ${name}`)
-    withTx(db, () => {
-      db.exec(sql)
-      db.prepare('INSERT INTO _migrations (name) VALUES (?)').run([name])
-    })
-    count++
-    logger.info(`[Migrate] Applied: ${name}`)
-  }
-
-  if (count === 0) logger.info('[Migrate] Database is up to date')
-  else logger.info(`[Migrate] ${count} migration(s) applied`)
+-- Indexes for long-term (10yr) report performance
+CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales(sale_date, status);
+CREATE INDEX IF NOT EXISTS idx_payments_method   ON payments(method);
+`,
 }
