@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAppStore }  from '../../store/appStore'
 import { useAuthStore } from '../../store/authStore'
 import { Building2, Receipt, Mail, Printer, Network, HardDrive, UserCog, Tag, Percent, TestTube, Plus, Edit2, Trash2, X } from 'lucide-react'
@@ -42,6 +42,11 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [appPaths, setAppPaths] = useState<any>(null)
+  // Scanner test: USB scanners type ultra-fast (<100ms between keys) then Enter.
+  const [scanTest,    setScanTest]    = useState('')
+  const [scanResult,  setScanResult]  = useState<'idle'|'scanner'|'keyboard'>('idle')
+  const scanT0 = useRef(0)
+  const scanT1 = useRef(0)
   // Category edit state
   const [catForm, setCatForm] = useState<{id?:number;name:string;color:string}|null>(null)
 
@@ -346,6 +351,63 @@ export default function SettingsPage() {
                     <option value="58mm">58mm (Narrow)</option>
                   </select></div>
                 <button onClick={()=>window.api.hardware.testPrint().then(r=>{if(r.success)addToast('success','Test print sent!')})} className="btn-secondary">Test Print</button>
+
+                {/* Auto-print receipt after each sale */}
+                <label className="flex items-center gap-3 cursor-pointer pt-2 border-t border-slate-100">
+                  <input type="checkbox" checked={S('auto_print_receipt')!=='false'}
+                    onChange={e=>saveSetting('auto_print_receipt',e.target.checked?'true':'false')}/>
+                  <div>
+                    <p className="font-medium text-sm">Auto-print receipt after every sale</p>
+                    <p className="text-xs text-slate-500">Prints immediately on payment. Reprint anytime from the Sales page.</p>
+                  </div>
+                </label>
+              </div>
+
+              {/* ── Barcode Scanner Check ── */}
+              {/* USB scanners are keyboards that "type" the whole code in under */}
+              {/* ~100ms then press Enter. We time the input to verify the device. */}
+              <div className="card space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Barcode Scanner Check</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Plug in your USB scanner, click the box below, then scan any barcode.
+                    No drivers needed — scanners work as keyboards.
+                  </p>
+                </div>
+                <input
+                  className="input font-mono"
+                  placeholder="Click here, then scan a barcode…"
+                  value={scanTest}
+                  onChange={e=>{
+                    if (scanTest==='' ) scanT0.current = Date.now()
+                    scanT1.current = Date.now()
+                    setScanTest(e.target.value)
+                    setScanResult('idle')
+                  }}
+                  onKeyDown={e=>{
+                    if (e.key!=='Enter' || scanTest.length<3) return
+                    const elapsed = scanT1.current - scanT0.current
+                    const perChar = elapsed / Math.max(1, scanTest.length-1)
+                    // Scanner: whole code typed at <50ms/char. Human: >120ms/char.
+                    setScanResult(perChar < 50 ? 'scanner' : 'keyboard')
+                  }}
+                />
+                {scanResult==='scanner' && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-800">
+                    ✅ <strong>Scanner detected and working.</strong> Code read: <code className="font-mono">{scanTest}</code>.
+                    It will work automatically on the POS screen — no setup needed.
+                  </div>
+                )}
+                {scanResult==='keyboard' && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                    ⌨️ That looked like manual typing, not a scanner. If your scanner is plugged in,
+                    make sure this box is focused and scan again. Check the USB cable and try another port.
+                  </div>
+                )}
+                {(scanResult!=='idle'||scanTest) && (
+                  <button onClick={()=>{setScanTest('');setScanResult('idle')}}
+                    className="text-xs text-slate-400 hover:text-slate-600">↺ Clear and test again</button>
+                )}
               </div>
             </div>
           )}
