@@ -268,7 +268,13 @@ export function registerSettingsHandlers(db: DB): void {
     // This is read from the 'backup_path' setting, not from opts, so the
     // chosen path persists across app restarts.
     const backupDir = resolveBackupDir(db)
-    const ts        = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    // Same naming convention as the auto-backup scheduler:
+    //   novapos-backup-2026-06-12_14-30.novaenc
+    // Readable at a glance and sorts chronologically — the LAST file
+    // alphabetically is always the LATEST backup.
+    const d   = new Date()
+    const p2  = (n: number) => String(n).padStart(2, '0')
+    const ts  = `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}_${p2(d.getHours())}-${p2(d.getMinutes())}`
     const filename  = `novapos-backup-${ts}.novaenc`
 
     // Encrypt the live DB
