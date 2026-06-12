@@ -3,7 +3,7 @@ import nodemailer, { Transporter } from 'nodemailer'
 import fs   from 'node:fs'
 import path from 'node:path'
 import { createHash, createCipheriv, randomBytes } from 'node:crypto'
-import { app } from 'electron'
+import { app, Notification } from 'electron'
 import { format } from 'date-fns'
 import { getSetting, setSetting, getAllSettings } from '../services/settingsService'
 import { getDb } from '../database/connection'
@@ -186,6 +186,17 @@ export async function performBackup(): Promise<BackupResult> {
   fs.writeFileSync(savedPath, encryptedBlob)
   logger.info(`[Backup] Encrypted backup saved: ${savedPath}`)
 
+  // ── Desktop notification so the user knows it ran ─────
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'NovaPOS — Backup Complete',
+        body:  `Encrypted backup saved (${(encryptedBlob.length/1024/1024).toFixed(2)} MB)\n${filename}`,
+        silent: true,
+      }).show()
+    }
+  } catch { /* notifications unavailable — non-fatal */ }
+
   // Record last backup time and file in settings
   try {
     setSetting(db, 'last_backup_at',   new Date().toISOString())
@@ -274,7 +285,18 @@ function checkBackupSchedule(): void {
   if (schedule === 'weekly'  && dayOfWeek !== parseInt(settings.backup_day ?? '1')) return
   if (schedule === 'monthly' && dayOfMonth !== parseInt(settings.backup_day ?? '1')) return
 
-  performBackup().catch((err) => logger.error('[Backup] Scheduled backup failed:', err))
+  performBackup().catch((err) => {
+    logger.error('[Backup] Scheduled backup failed:', err)
+    // Tell the user it failed — silence here would mean silent data risk
+    try {
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'NovaPOS — Backup FAILED',
+          body:  `Scheduled backup did not complete: ${(err as Error).message}. It will retry on next startup.`,
+        }).show()
+      }
+    } catch { /* non-fatal */ }
+  })
 }
 
 function checkReportSchedule(): void {
