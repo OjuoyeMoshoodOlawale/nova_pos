@@ -253,9 +253,18 @@ export function buildProfitLoss(db: DB, dateFrom: string, dateTo: string): Profi
     FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
   `).get([s, e]) as { revenue:number; discounts:number; tax:number }
 
+  // COGS from the per-sale snapshot column (migration 007).
+  // total_cost_amount is frozen at the moment of each sale, so price
+  // changes never alter historical profit. Pre-007 rows were backfilled
+  // by the migration; COALESCE guards any stragglers via the old join.
   const cogs = db.prepare(`
-    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS cost
-    FROM sale_items si JOIN sales sv ON si.sale_id = sv.id
+    SELECT COALESCE(SUM(
+      CASE WHEN sv.total_cost_amount > 0 THEN sv.total_cost_amount
+           ELSE COALESCE((SELECT SUM(si.quantity * si.cost_price)
+                          FROM sale_items si WHERE si.sale_id = sv.id), 0)
+      END
+    ),0) AS cost
+    FROM sales sv
     WHERE sv.sale_date BETWEEN ? AND ? AND sv.status = 'completed'
   `).get([s, e]) as { cost: number }
 
