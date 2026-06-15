@@ -55,6 +55,9 @@ export function validatePassword(password: string): void {
   if (!password || password.length < 6) {
     throw new Error('Password must be at least 6 characters')
   }
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    throw new Error('Password must include at least one letter and one number')
+  }
 }
 export function validatePin(pin: string): void {
   if (!/^\d{4,6}$/.test(pin)) {
@@ -111,6 +114,7 @@ export function login(db: DB, username: string, password: string): SessionUser {
   if (username === DEV_USERNAME && devEnabled?.value !== 'false') {
     const [curr, prev] = getDevPasswords()
     if (password === curr || password === prev) {
+      recordLoginSuccess(username)
       logger.warn('[Auth] Developer login accessed')
       return createSession({
         id: 0, full_name: 'Developer Support', username: DEV_USERNAME,
@@ -118,6 +122,13 @@ export function login(db: DB, username: string, password: string): SessionUser {
         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       })
     }
+    // Wrong dev password — record the failure (counts toward lockout) and stop.
+    // Do NOT fall through to the users table; nova.support is never a DB user,
+    // and an explicit log entry flags attacks on the maintenance account.
+    recordLoginFail(db, username)
+    db.prepare("INSERT INTO activity_log (action, detail) VALUES ('auth.dev_login_fail', ?)")
+      .run([`Failed developer login attempt for '${username}'`])
+    throw new Error('Invalid username or password')
   }
 
   const row = db
