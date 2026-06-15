@@ -390,3 +390,45 @@ CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales(sale_date, status);
 CREATE INDEX IF NOT EXISTS idx_payments_method   ON payments(method);
 `,
 }
+
+
+// ─── Migration runner ─────────────────────────────────────
+// Applies any migrations not yet recorded in the _migrations table,
+// in filename order, each inside its own transaction.
+export function runMigrations(db: DB): void {
+  // Ensure the tracking table exists first
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL UNIQUE,
+      applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
+  const applied = new Set(
+    (db.prepare('SELECT name FROM _migrations').all() as { name: string }[])
+      .map(r => r.name)
+  )
+
+  const names = Object.keys(MIGRATIONS).sort()
+  let count = 0
+
+  for (const name of names) {
+    if (applied.has(name)) continue
+    const sql = MIGRATIONS[name]
+    try {
+      withTx(db, () => {
+        db.exec(sql)
+        db.prepare('INSERT INTO _migrations (name) VALUES (?)').run([name])
+      })
+      count++
+      logger.info(`[Migrate] Applied: ${name}`)
+    } catch (err) {
+      logger.error(`[Migrate] FAILED on ${name}: ${(err as Error).message}`)
+      throw err
+    }
+  }
+
+  if (count === 0) logger.info('[Migrate] Database already up to date')
+  else logger.info(`[Migrate] Applied ${count} migration(s)`)
+}
