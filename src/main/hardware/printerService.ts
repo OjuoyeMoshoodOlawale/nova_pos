@@ -49,9 +49,9 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
       `${sym}${item.unit_price.toFixed(2)}`,
       `${sym}${item.line_total.toFixed(2)}`,
     ]),
-    tableHeaderStyle: 'border: none; font-size: 11px; font-weight: bold;',
-    tableBodyStyle:   'border: none; font-size: 11px;',
-    style:            'width: 100%;',
+    tableHeaderStyle: { border: 'none', fontSize: '11px', fontWeight: 'bold' },
+    tableBodyStyle:   { border: 'none', fontSize: '11px' },
+    style:            { width: '100%' },
   })
 
   for (const item of sale.items) {
@@ -65,7 +65,12 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   if (sale.discount_amt > 0) rows.push([`Discount (${sale.discount_pct}%):`, `-${sym}${sale.discount_amt.toFixed(2)}`])
   if (sale.tax_amount   > 0) rows.push([`${profile.tax_name}:`, `${sym}${sale.tax_amount.toFixed(2)}`])
 
-  data.push({ type: 'table', tableBody: rows.map(([k, v]) => [k, v]), tableBodyStyle: 'border: none; font-size: 12px;', style: 'width: 100%;' })
+  data.push({
+    type: 'table',
+    tableBody: rows.map(([k, v]) => [k, v]),
+    tableBodyStyle: { border: 'none', fontSize: '12px' },
+    style: { width: '100%' },
+  })
   data.push(t(`TOTAL: ${sym}${sale.total_amount.toFixed(2)}`, true, 'right', '18px'))
   data.push(divider())
 
