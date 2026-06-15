@@ -5,6 +5,7 @@ import { useAppStore } from '../../store/appStore'
 import DataTable, { Column } from '../../components/DataTable/DataTable'
 import ProductForm from './ProductForm'
 import StockAdjustModal from './StockAdjustModal'
+import StockReceiveModal from './StockReceiveModal'
 import BulkImportModal from './BulkImportModal'
 import { Plus, Edit2, Archive, BarChart2, Upload, Package } from 'lucide-react'
 
