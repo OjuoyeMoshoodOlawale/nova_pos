@@ -15,7 +15,9 @@
     "package:linux": "npm run build && electron-builder --linux",
     "typecheck": "tsc --noEmit",
     "gen-key": "node scripts/gen-activation-key.js",
-    "dev-pass": "node scripts/get-dev-password.js"
+    "dev-pass": "node scripts/get-dev-password.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "date-fns": "^3.6.0",
@@ -58,6 +60,7 @@
     "tailwindcss": "^3.4.6",
     "typescript": "^5.5.2",
     "vite": "^5.3.2",
-    "zustand": "^4.5.4"
+    "zustand": "^4.5.4",
+    "vitest": "^2.1.8"
   }
 }
