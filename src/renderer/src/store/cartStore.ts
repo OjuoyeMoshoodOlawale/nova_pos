@@ -93,10 +93,11 @@ export const useCartStore = create<CartState>((set, get) => ({
 
       const newItem: CartItem = {
         product_id: product.id, product_name: product.name, barcode: product.barcode,
+        sku: (product as any).sku ?? null,
         unit_price: effectivePrice, quantity: 1, discount_pct: effectiveDisc,
         line_total: effectivePrice, cost_price: costPrice,
         sell_mode: mode, unit_label: unitLabel, stock_qty: stockQty,
-      }
+      } as any
       return { items: [...s.items, newItem] }
     })
 
