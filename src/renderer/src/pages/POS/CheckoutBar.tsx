@@ -107,19 +107,26 @@ export default function CheckoutBar() {
 
     if (r.success && r.data) {
       const product = r.data as Product
+      const p = product as any
+      // pricing_mode: 'unit' | 'both' | 'bulk' (migration 008); fall back to legacy flag.
+      const pmode: 'unit' | 'both' | 'bulk' =
+        p.pricing_mode ?? (p.has_bulk_pricing && p.bulk_unit ? 'both' : 'unit')
 
-      // If product has bulk pricing, show choice for 4 seconds
-      if ((product as any).has_bulk_pricing && (product as any).bulk_unit) {
+      if (pmode === 'bulk' && p.bulk_unit) {
+        // Bulk-only product — no choice needed, add as bulk directly.
+        await addProduct(product, 'bulk')
+      } else if (pmode === 'both' && p.bulk_unit) {
+        // Sells both ways — show the 4-second pcs/bulk chooser.
         setBulkChoice(product)
         clearTimeout(bulkChoiceTimer.current)
         bulkChoiceTimer.current = setTimeout(() => {
-          // Timeout — default to unit
-          addProduct(product, 'unit')
+          addProduct(product, 'unit')   // default to pcs if no choice made
         }, 4000)
         setStatus('ready')
         setValue('')
         beep(true)
       } else {
+        // Unit-only product.
         await addProduct(product, 'unit')
       }
     } else {
@@ -245,23 +252,29 @@ export default function CheckoutBar() {
           {showDrop && results.length > 0 && (
             <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl mt-1 z-50 overflow-hidden max-h-80 overflow-y-auto">
               {results.map(p => {
-                const hasBulk = !!(p as any).has_bulk_pricing && !!(p as any).bulk_unit
+                const pp = p as any
+                // pricing_mode: 'unit' | 'both' | 'bulk' (migration 008); legacy fallback.
+                const pmode: 'unit' | 'both' | 'bulk' =
+                  pp.pricing_mode ?? (pp.has_bulk_pricing && pp.bulk_unit ? 'both' : 'unit')
+                const hasBulk = (pmode === 'both' || pmode === 'bulk') && !!pp.bulk_unit
+                const hasUnit = pmode === 'unit' || pmode === 'both'
                 return (
                   <div key={p.id} className="border-b border-slate-50 last:border-0">
-                    {/* Unit row */}
+                    {/* Unit row — shown unless the product is bulk-only */}
+                    {hasUnit && (
                     <button
                       onMouseDown={e => { e.preventDefault(); addProduct(p, 'unit') }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-blue-50 transition text-left"
                     >
                       <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
-                        {(p as any).image_data
-                          ? <img src={(p as any).image_data} className="w-full h-full object-cover" />
+                        {pp.image_data
+                          ? <img src={pp.image_data} className="w-full h-full object-cover" />
                           : <Package className="w-4 h-4 text-slate-300" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
                         <p className="text-xs text-slate-400">
-                          {(p as any).barcode ? <span className="font-mono">{(p as any).barcode} · </span> : ''}
+                          {pp.barcode ? <span className="font-mono">{pp.barcode} · </span> : ''}
                           {p.stock_qty} {p.unit} in stock
                         </p>
                       </div>
@@ -272,13 +285,29 @@ export default function CheckoutBar() {
                         </span>
                         {hasBulk && (
                           <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mt-0.5">
-                            by unit
+                            tap for {p.unit}
                           </p>
                         )}
                       </div>
                     </button>
+                    )}
 
-                    {/* Bulk row (only if product has bulk pricing) */}
+                    {/* For bulk-only products, show the name header above the bulk row */}
+                    {!hasUnit && hasBulk && (
+                      <div className="flex items-center gap-3 px-4 pt-2.5 pb-1">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden">
+                          {pp.image_data
+                            ? <img src={pp.image_data} className="w-full h-full object-cover" />
+                            : <Package className="w-4 h-4 text-slate-300" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{p.name}</p>
+                          <p className="text-xs text-slate-400">Sold by {pp.bulk_unit} only · {p.stock_qty} {p.unit} in stock</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bulk row */}
                     {hasBulk && (
                       <button
                         onMouseDown={e => { e.stopPropagation(); e.preventDefault(); addProduct(p, 'bulk') }}
@@ -288,16 +317,16 @@ export default function CheckoutBar() {
                           <span className="text-base">📦</span>
                           <div>
                             <span className="text-xs font-semibold text-amber-800">
-                              Buy by {(p as any).bulk_unit}
+                              Buy by {pp.bulk_unit}
                             </span>
                             <span className="text-xs text-amber-600 ml-2">
-                              ({(p as any).units_per_bulk} {p.unit}s each)
+                              ({pp.units_per_bulk} {p.unit}s each)
                             </span>
                           </div>
                         </div>
                         <span className="text-sm font-bold text-amber-700">
-                          {sym}{(p as any).bulk_selling_price?.toFixed(2)}
-                          <span className="text-xs font-normal text-amber-500">/{(p as any).bulk_unit}</span>
+                          {sym}{pp.bulk_selling_price?.toFixed(2)}
+                          <span className="text-xs font-normal text-amber-500">/{pp.bulk_unit}</span>
                         </span>
                       </button>
                     )}
