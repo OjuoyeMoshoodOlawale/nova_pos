@@ -49,7 +49,11 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   addItem(product, mode = 'unit') {
-    const isBulk    = mode === 'bulk' && product.has_bulk_pricing && !!product.bulk_unit
+    const p = product as any
+    // A product is bulk-capable if pricing_mode allows it (migration 008),
+    // or via the legacy has_bulk_pricing flag for products saved earlier.
+    const bulkCapable = (p.pricing_mode === 'both' || p.pricing_mode === 'bulk' || p.has_bulk_pricing) && !!product.bulk_unit
+    const isBulk    = mode === 'bulk' && bulkCapable
     const unitPrice = isBulk ? product.bulk_selling_price : product.selling_price
     const costPrice = isBulk ? product.bulk_buying_price  : product.cost_price
     const unitLabel = isBulk ? (product.bulk_unit || 'bulk') : product.unit
