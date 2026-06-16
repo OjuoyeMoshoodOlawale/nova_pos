@@ -209,11 +209,24 @@ export function receiveStock(db: DB, input: StockReceiveInput): void {
       updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
 
     } else if (input.price_mode === 'auto_switch') {
+      // "Sell old stock at the current price, then switch."
+      // The OLD units (prod.stock_qty before this receipt) keep the old
+      // price. After receiving, total = prod.stock_qty + qty_received.
+      // The new price should begin once those OLD units are sold — i.e.
+      // when stock drops to (newQty - oldStock) = qty_received remaining.
+      //
+      // We compute the threshold from the CURRENT stock so it's correct
+      // regardless of what the caller passes:
+      //   threshold = newQty - oldStock = qty_received
+      // Stored explicitly (not relying on the caller) for clarity & safety.
+      const oldStock  = prod.stock_qty
+      const threshold = input.switch_at_qty ?? (newQty - oldStock)
+
       updates.push('pending_sell_price = ?', 'pending_bulk_price = ?', 'price_switch_at_qty = ?')
       vals.push(
         input.new_selling_price      ?? null,
         input.new_bulk_selling_price ?? null,
-        input.switch_at_qty          ?? input.qty_received,
+        threshold,
       )
       // Pending prices don't take effect yet — keep old for reporting
       newSellPrice = input.new_selling_price      ?? prod.selling_price
