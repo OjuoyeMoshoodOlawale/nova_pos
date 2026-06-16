@@ -269,12 +269,24 @@ export function buildProfitLoss(db: DB, dateFrom: string, dateTo: string): Profi
   `).get([s, e]) as { cost: number }
 
   const grossProfit = sales.revenue - cogs.cost
+
+  // Top products for the period (used by the dashboard's Top Products panel).
+  const topProducts = db.prepare(`
+    SELECT si.product_name AS name,
+           SUM(si.quantity)   AS qty,
+           SUM(si.line_total) AS revenue
+    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
+    GROUP BY si.product_id ORDER BY revenue DESC LIMIT 10
+  `).all([s, e]) as { name: string; qty: number; revenue: number }[]
+
   return {
     period: `${dateFrom} to ${dateTo}`, revenue: sales.revenue,
     cogs: cogs.cost, grossProfit,
     grossMargin: sales.revenue > 0 ? (grossProfit/sales.revenue)*100 : 0,
     totalDiscounts: sales.discounts, taxCollected: sales.tax,
     netRevenue: sales.revenue - sales.discounts,
+    topProducts,
   }
 }
 
