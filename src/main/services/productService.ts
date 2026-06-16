@@ -20,6 +20,7 @@ function toProduct(r: Record<string, unknown>): Product {
     cost_price:          Number(r.cost_price) || 0,
     selling_price:       Number(r.selling_price) || 0,
     has_bulk_pricing:    Boolean(r.has_bulk_pricing),
+    pricing_mode:        (r.pricing_mode as string) || (r.has_bulk_pricing ? 'both' : 'unit'),
     bulk_unit:           (r.bulk_unit as string) || null,
     units_per_bulk:      Number(r.units_per_bulk) || 1,
     bulk_buying_price:   Number(r.bulk_buying_price) || 0,
@@ -73,21 +74,47 @@ export function getLowStockProducts(db: DB): Product[] {
   ).all() as any[]).map(toProduct)
 }
 
+// ─── Auto-generate a unique SKU when none is provided ────
+// Format: NP-XXXXXX  (NP + 6 chars from name + a numeric tail).
+// Retries with an incrementing suffix until the SKU is unique, so two
+// products with similar names never collide.
+function generateUniqueSku(db: DB, name: string): string {
+  const base = (name || 'ITEM')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')   // strip spaces/punctuation
+    .slice(0, 6)
+    .padEnd(3, 'X')
+
+  // Try NP-BASE-001, -002, … until one is free.
+  for (let n = 1; n <= 9999; n++) {
+    const candidate = `NP-${base}-${String(n).padStart(3, '0')}`
+    const exists = db.prepare('SELECT 1 FROM products WHERE sku = ? LIMIT 1').get([candidate])
+    if (!exists) return candidate
+  }
+  // Extremely unlikely fallback: timestamp-based, guaranteed unique
+  return `NP-${base}-${Date.now().toString().slice(-6)}`
+}
+
 export function createProduct(db: DB, dto: Partial<Product> & { name: string }): Product {
+  // Empty SKU → auto-generate a unique one (never store null/'' which
+  // would trip the UNIQUE index when a second blank SKU is saved).
+  const sku = (dto.sku && String(dto.sku).trim()) ? String(dto.sku).trim() : generateUniqueSku(db, dto.name)
+
   const result = db.prepare(`
     INSERT INTO products (
       name, sku, barcode, category_id, supplier_id, parent_id,
       unit, cost_price, selling_price,
-      has_bulk_pricing, bulk_unit, units_per_bulk, bulk_buying_price, bulk_selling_price,
+      has_bulk_pricing, pricing_mode, bulk_unit, units_per_bulk, bulk_buying_price, bulk_selling_price,
       stock_qty, reorder_level, image_path, image_data, description
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run([
     dto.name,
-    dto.sku ?? null,          dto.barcode ?? null,
+    sku,                      dto.barcode ?? null,
     dto.category_id ?? null,  dto.supplier_id ?? null,  null,
     dto.unit ?? 'pcs',
     dto.cost_price ?? 0,      dto.selling_price ?? 0,
     (dto as any).has_bulk_pricing ? 1 : 0,
+    (dto as any).pricing_mode ?? 'unit',
     (dto as any).bulk_unit    ?? null,
     (dto as any).units_per_bulk ?? 1,
     (dto as any).bulk_buying_price  ?? 0,
@@ -107,9 +134,15 @@ export function updateProduct(db: DB, id: number, dto: Record<string, unknown>, 
   const allowed = [
     'name','sku','barcode','category_id','supplier_id','unit',
     'cost_price','selling_price','stock_qty','reorder_level','description',
-    'has_bulk_pricing','bulk_unit','units_per_bulk','bulk_buying_price','bulk_selling_price',
+    'has_bulk_pricing','pricing_mode','bulk_unit','units_per_bulk','bulk_buying_price','bulk_selling_price',
     'image_path','image_data',
   ]
+  // If the edit blanks out the SKU, auto-generate a unique one instead of
+  // storing an empty string (which would clash on the UNIQUE index).
+  if ('sku' in dto && !(dto.sku && String(dto.sku).trim())) {
+    const nameForSku = (dto.name as string) ?? (db.prepare('SELECT name FROM products WHERE id = ?').get([id]) as any)?.name ?? 'ITEM'
+    dto.sku = generateUniqueSku(db, nameForSku)
+  }
   const sets: string[] = [`updated_at = datetime('now')`]
   const vals: unknown[] = []
 
@@ -209,28 +242,42 @@ export function receiveStock(db: DB, input: StockReceiveInput): void {
       updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
 
     } else if (input.price_mode === 'auto_switch') {
-      // "Sell old stock at the current price, then switch."
-      // The OLD units (prod.stock_qty before this receipt) keep the old
-      // price. After receiving, total = prod.stock_qty + qty_received.
-      // The new price should begin once those OLD units are sold — i.e.
-      // when stock drops to (newQty - oldStock) = qty_received remaining.
+      // "Sell old stock at the current price, then switch to the new price."
       //
-      // We compute the threshold from the CURRENT stock so it's correct
-      // regardless of what the caller passes:
-      //   threshold = newQty - oldStock = qty_received
-      // Stored explicitly (not relying on the caller) for clarity & safety.
+      // OLD units = prod.stock_qty (before this receipt). They keep the old
+      // price. After receiving, total = oldStock + qty_received = newQty.
+      // The new price begins once the OLD units are gone — i.e. when stock
+      // drops to (newQty - oldStock).
+      //
+      // We ALWAYS compute this here and ignore any caller-supplied value,
+      // because the front-end cannot know the authoritative old stock count.
       const oldStock  = prod.stock_qty
-      const threshold = input.switch_at_qty ?? (newQty - oldStock)
+      const threshold = newQty - oldStock   // = qty_received remaining
 
-      updates.push('pending_sell_price = ?', 'pending_bulk_price = ?', 'price_switch_at_qty = ?')
-      vals.push(
-        input.new_selling_price      ?? null,
-        input.new_bulk_selling_price ?? null,
-        threshold,
-      )
-      // Pending prices don't take effect yet — keep old for reporting
-      newSellPrice = input.new_selling_price      ?? prod.selling_price
-      newBulkPrice = input.new_bulk_selling_price ?? prod.bulk_selling_price
+      if (oldStock <= 0) {
+        // No old stock to sell first → the new price should apply immediately.
+        // Switch now instead of setting a pending price that would fire on
+        // the very next sale anyway.
+        if (input.new_selling_price != null) {
+          updates.push('selling_price = ?'); vals.push(input.new_selling_price)
+          newSellPrice = input.new_selling_price
+        }
+        if (input.new_bulk_selling_price != null) {
+          updates.push('bulk_selling_price = ?'); vals.push(input.new_bulk_selling_price)
+          newBulkPrice = input.new_bulk_selling_price
+        }
+        updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
+      } else {
+        updates.push('pending_sell_price = ?', 'pending_bulk_price = ?', 'price_switch_at_qty = ?')
+        vals.push(
+          input.new_selling_price      ?? null,
+          input.new_bulk_selling_price ?? null,
+          threshold,
+        )
+        // Pending prices don't take effect yet — keep old for reporting
+        newSellPrice = input.new_selling_price      ?? prod.selling_price
+        newBulkPrice = input.new_bulk_selling_price ?? prod.bulk_selling_price
+      }
     }
     // 'keep' mode: only update stock and cost
 
