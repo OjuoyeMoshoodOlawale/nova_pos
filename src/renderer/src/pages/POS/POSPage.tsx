@@ -98,69 +98,74 @@ function CartRow({ item, flash }: { item: CartItem; flash?: boolean }) {
   const [discInput, setDiscInput] = useState('')
   const mode    = item.sell_mode as SellMode
   const atLimit = item.quantity >= item.stock_qty
+  const sku     = (item as any).sku as string | undefined
 
   return (
-    <div className={`group py-2.5 border-b border-slate-50 last:border-0 transition-colors ${flash ? 'bg-green-50' : ''}`}>
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
+    <div className={`group transition-colors ${flash ? 'bg-green-50' : 'hover:bg-slate-50'}`}>
+      {/* Spreadsheet-style row: Item | Price | Qty | Total */}
+      <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-px">
+
+        {/* Item cell (name + sku + per-unit price) */}
+        <div className="px-2 py-1.5 min-w-0">
           <p className="text-sm font-medium text-slate-800 truncate">{item.product_name}</p>
-          <p className="text-xs text-slate-400">
-            {currencySymbol}{item.unit_price.toFixed(2)}/{item.unit_label}
-            {item.discount_pct > 0 && <span className="text-amber-500 ml-1">(-{item.discount_pct}%)</span>}
+          <p className="text-[11px] text-slate-400 truncate">
+            {sku ? <span className="font-mono">{sku}</span> : null}
+            {sku ? ' · ' : ''}per {item.unit_label}
+            {item.discount_pct > 0 && <span className="text-amber-500 ml-1">−{item.discount_pct}%</span>}
           </p>
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
+
+        {/* Price cell */}
+        <div className="px-2 py-1.5 text-right w-20 text-sm text-slate-600 tabular-nums">
+          {currencySymbol}{item.unit_price.toFixed(2)}
+        </div>
+
+        {/* Qty cell (− input +) */}
+        <div className="px-1 py-1.5 w-24 flex items-center justify-center gap-0.5">
           <button onClick={() => updateQty(item.product_id, mode, item.quantity - 1)}
-            className="w-6 h-6 rounded-full bg-slate-100 hover:bg-red-100 flex items-center justify-center">
+            className="w-5 h-5 rounded bg-slate-100 hover:bg-red-100 flex items-center justify-center flex-shrink-0">
             <Minus className="w-3 h-3" />
           </button>
-          {/* Type the quantity directly — clears on focus, clamps to stock on blur */}
           <input
-            type="number"
-            min={1}
-            max={item.stock_qty}
-            value={item.quantity}
+            type="number" min={1} max={item.stock_qty} value={item.quantity}
             onChange={e => {
               const n = parseInt(e.target.value)
               if (!isNaN(n) && n > 0) updateQty(item.product_id, mode, Math.min(n, item.stock_qty))
             }}
             onFocus={e => e.currentTarget.select()}
-            className="w-12 text-center text-sm font-bold border border-slate-200 rounded-md py-0.5 focus:border-blue-400 focus:outline-none"
+            className="w-10 text-center text-sm font-bold border border-slate-200 rounded py-0.5 focus:border-blue-400 focus:outline-none tabular-nums"
           />
-          <button
-            onClick={() => updateQty(item.product_id, mode, item.quantity + 1)}
-            disabled={atLimit}
-            className={`w-6 h-6 rounded-full flex items-center justify-center ${atLimit ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-slate-100 hover:bg-green-100'}`}
-          >
+          <button onClick={() => updateQty(item.product_id, mode, item.quantity + 1)} disabled={atLimit}
+            className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${atLimit ? 'bg-slate-50 text-slate-300 cursor-not-allowed' : 'bg-slate-100 hover:bg-green-100'}`}>
             <Plus className="w-3 h-3" />
           </button>
         </div>
-        <span className="text-sm font-bold w-20 text-right">{currencySymbol}{item.line_total.toFixed(2)}</span>
-        <button
-          onClick={() => removeItem(item.product_id, mode)}
-          className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600"
-        >
-          <X className="w-4 h-4" />
-        </button>
+
+        {/* Total cell */}
+        <div className="px-2 py-1.5 text-right w-20 flex items-center justify-end gap-1">
+          <span className="text-sm font-bold tabular-nums">{currencySymbol}{item.line_total.toFixed(2)}</span>
+          <button onClick={() => removeItem(item.product_id, mode)}
+            className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 flex-shrink-0">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
+
+      {/* Below-row notices: stock limit + discount editor */}
       {atLimit && (
-        <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
-          ⚠️ Max stock ({item.stock_qty} {item.unit_label} available)
-        </p>
+        <p className="text-[11px] text-amber-600 px-2 pb-1">⚠️ Max stock ({item.stock_qty} {item.unit_label})</p>
       )}
       {showDisc ? (
-        <div className="mt-1.5 flex items-center gap-2">
-          <input
-            type="number" value={discInput} onChange={e => setDiscInput(e.target.value)}
-            placeholder="%" className="input text-xs py-1 w-20"
-            onKeyDown={e => { if (e.key === 'Enter') { setItemDiscount(item.product_id, mode, parseFloat(discInput) || 0); setShowDisc(false) } }}
-          />
+        <div className="px-2 pb-1.5 flex items-center gap-2">
+          <input type="number" value={discInput} onChange={e => setDiscInput(e.target.value)}
+            placeholder="discount %" className="input text-xs py-1 w-24"
+            onKeyDown={e => { if (e.key === 'Enter') { setItemDiscount(item.product_id, mode, parseFloat(discInput) || 0); setShowDisc(false) } }} />
           <button onClick={() => { setItemDiscount(item.product_id, mode, parseFloat(discInput) || 0); setShowDisc(false) }} className="text-xs text-blue-600">Apply</button>
           <button onClick={() => setShowDisc(false)} className="text-xs text-slate-400">Cancel</button>
         </div>
       ) : (
-        <button onClick={() => setShowDisc(true)} className="opacity-0 group-hover:opacity-100 mt-0.5 flex items-center gap-1 text-xs text-slate-400 hover:text-amber-500">
-          <Tag className="w-3 h-3" /> Item discount
+        <button onClick={() => setShowDisc(true)} className="opacity-0 group-hover:opacity-100 px-2 pb-1 flex items-center gap-1 text-[11px] text-slate-400 hover:text-amber-500">
+          <Tag className="w-3 h-3" /> discount
         </button>
       )}
     </div>
@@ -406,8 +411,8 @@ export default function POSPage() {
             />
           </div>
 
-          {/* Cart items */}
-          <div className="flex-1 overflow-y-auto px-4 py-2">
+          {/* Cart items — Excel-style grid */}
+          <div className="flex-1 overflow-y-auto px-2 py-2">
             {cart.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-300 py-12">
                 <ShoppingCart className="w-12 h-12 mb-3" />
@@ -415,13 +420,25 @@ export default function POSPage() {
                 <p className="text-xs mt-1">Scan a barcode or search above</p>
               </div>
             ) : (
-              cart.items.map(item => (
-                <CartRow
-                  key={cart.getItemKey(item.product_id, item.sell_mode as SellMode)}
-                  item={item}
-                  flash={flashKey === cart.getItemKey(item.product_id, item.sell_mode as SellMode)}
-                />
-              ))
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                {/* Header row (like a spreadsheet) */}
+                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-px bg-slate-200 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                  <div className="bg-slate-50 px-2 py-1.5">Item</div>
+                  <div className="bg-slate-50 px-2 py-1.5 text-right w-20">Price</div>
+                  <div className="bg-slate-50 px-2 py-1.5 text-center w-24">Qty</div>
+                  <div className="bg-slate-50 px-2 py-1.5 text-right w-20">Total</div>
+                </div>
+                {/* Data rows */}
+                <div className="divide-y divide-slate-100 bg-white">
+                  {cart.items.map(item => (
+                    <CartRow
+                      key={cart.getItemKey(item.product_id, item.sell_mode as SellMode)}
+                      item={item}
+                      flash={flashKey === cart.getItemKey(item.product_id, item.sell_mode as SellMode)}
+                    />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
