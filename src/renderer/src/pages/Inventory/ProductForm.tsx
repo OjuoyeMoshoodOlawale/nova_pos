@@ -74,6 +74,11 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
     reorder_level:      p?.reorder_level     ?? 5,
     description:        p?.description       || '',
     has_bulk_pricing:   p?.has_bulk_pricing  ?? false,
+    // pricing_mode: how this product is sold.
+    //   'unit' = pieces only · 'both' = pieces + bulk · 'bulk' = bulk only
+    // Derive from saved value, or from the legacy has_bulk_pricing flag.
+    pricing_mode:       ((p as any)?.pricing_mode
+                          ?? (p?.has_bulk_pricing ? 'both' : 'unit')) as 'unit' | 'both' | 'bulk',
     bulk_unit:          p?.bulk_unit         || 'carton',
     units_per_bulk:     p?.units_per_bulk    ?? 1,
     bulk_buying_price:  p?.bulk_buying_price ?? 0,
@@ -121,14 +126,15 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
     }))
   }
 
-  // ── Toggle bulk pricing on/off ───────────────────────────
-  function onToggleBulk(enabled: boolean) {
+  // ── Change how the product is sold (unit / both / bulk) ──
+  function onPricingModeChange(mode: 'unit' | 'both' | 'bulk') {
     setD(prev => ({
       ...prev,
-      has_bulk_pricing: enabled,
-      // When enabling: derive unit cost if bulk data already present
+      pricing_mode:     mode,
+      has_bulk_pricing: mode !== 'unit',   // keep legacy flag in sync
+      // When bulk becomes active, derive unit cost from bulk if available
       cost_price:
-        enabled && prev.bulk_buying_price > 0 && prev.units_per_bulk > 0
+        mode !== 'unit' && prev.bulk_buying_price > 0 && prev.units_per_bulk > 0
           ? prev.bulk_buying_price / prev.units_per_bulk
           : prev.cost_price,
     }))
@@ -191,10 +197,13 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
     if (!d.name.trim()) { addToast('error', 'Product name is required'); return }
 
     // Ensure cost_price is fully derived before saving
+    const bulkActive = d.pricing_mode !== 'unit'
     const payload = {
       ...d,
+      pricing_mode:     d.pricing_mode,
+      has_bulk_pricing: bulkActive,        // keep legacy flag consistent
       cost_price:
-        d.has_bulk_pricing && d.units_per_bulk > 0 && d.bulk_buying_price > 0
+        bulkActive && d.units_per_bulk > 0 && d.bulk_buying_price > 0
           ? d.bulk_buying_price / d.units_per_bulk
           : d.cost_price,
     }
@@ -295,26 +304,40 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
             </div>
           </div>
 
-          {/* ── SECTION 2: HOW YOU BUY ── */}
+          {/* ── SECTION 2: HOW YOU SELL ── */}
           <div className="rounded-xl border border-blue-100 overflow-hidden">
-            <div className="bg-blue-50 px-4 py-2.5 flex items-center justify-between">
+            <div className="bg-blue-50 px-4 py-2.5">
               <p className="text-sm font-semibold text-blue-800 flex items-center gap-2">
-                <Package className="w-4 h-4" /> How You Buy
+                <Package className="w-4 h-4" /> How You Sell This Product
               </p>
-              {/* Bulk toggle */}
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-xs text-blue-600">Buy in bulk?</span>
-                <div
-                  onClick={() => onToggleBulk(!d.has_bulk_pricing)}
-                  className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${d.has_bulk_pricing ? 'bg-blue-600' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${d.has_bulk_pricing ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                </div>
-              </label>
             </div>
 
             <div className="p-4 space-y-4">
-              {d.has_bulk_pricing ? (
+              {/* 3-way selector: pieces only / both / bulk only */}
+              <div className="grid grid-cols-3 gap-2">
+                {([
+                  ['unit', '🔢', 'Pieces only',  `Sell loose ${d.unit}`] as const,
+                  ['both', '📦🔢', 'Both ways',    `Pieces and ${d.bulk_unit}s`] as const,
+                  ['bulk', '📦', 'Bulk only',     `Sell only by ${d.bulk_unit}`] as const,
+                ]).map(([m, icon, title, sub]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onPricingModeChange(m)}
+                    className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 text-center transition ${
+                      d.pricing_mode === m
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="text-lg">{icon}</span>
+                    <span className={`text-xs font-semibold ${d.pricing_mode === m ? 'text-blue-700' : 'text-slate-700'}`}>{title}</span>
+                    <span className="text-[10px] text-slate-400 leading-tight">{sub}</span>
+                  </button>
+                ))}
+              </div>
+
+              {d.pricing_mode !== 'unit' ? (
                 <>
                   {/* Step 1: Bulk unit + count */}
                   <div className="grid grid-cols-3 gap-3 items-end">
@@ -401,7 +424,7 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                     />
                   </div>
                   <p className="text-xs text-slate-400 mt-1.5">
-                    Toggle "Buy in bulk?" above to enter carton/crate pricing instead
+                    Choose "Both ways" or "Bulk only" above to enter carton/crate pricing instead
                   </p>
                 </div>
               )}
@@ -417,8 +440,8 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
             </div>
             <div className="p-4 space-y-4">
 
-              {/* Bulk selling price (only when bulk pricing on) */}
-              {d.has_bulk_pricing && (
+              {/* Bulk selling price (when product sells in bulk) */}
+              {d.pricing_mode !== 'unit' && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="label">
@@ -443,7 +466,8 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                 </div>
               )}
 
-              {/* Unit selling price — always visible */}
+              {/* Unit selling price — shown unless the product is bulk-only */}
+              {d.pricing_mode !== 'bulk' && (
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="label">
@@ -466,6 +490,7 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                   </p>
                 )}
               </div>
+              )}
             </div>
           </div>
 
