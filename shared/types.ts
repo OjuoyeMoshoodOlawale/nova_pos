@@ -380,6 +380,7 @@ export interface ProfitLossData {
   totalDiscounts: number
   taxCollected: number
   netRevenue: number
+  topProducts?: { name: string; qty: number; revenue: number }[]
 }
 
 // ─── LAN NETWORK ─────────────────────────────────────────
