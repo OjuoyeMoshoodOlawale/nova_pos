@@ -27,32 +27,64 @@ interface CashierStats {
 // ── Product card in the browse grid ─────────────────────
 function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product, m: SellMode) => void }) {
   const { currencySymbol } = useCartStore()
+  const sym = currencySymbol
   const out = product.stock_qty <= 0
   const low = !out && product.stock_qty <= product.reorder_level
+
+  const p = product as any
+  // pricing_mode: 'unit' (pcs only) | 'both' (pcs + bulk) | 'bulk' (bulk only).
+  // Fall back to has_bulk_pricing for products saved before migration 008.
+  const mode: 'unit' | 'both' | 'bulk' =
+    p.pricing_mode ?? (p.has_bulk_pricing && p.bulk_unit ? 'both' : 'unit')
+  const hasBulk = (mode === 'both' || mode === 'bulk') && !!p.bulk_unit
+  const hasUnit = mode === 'unit' || mode === 'both'
+
   return (
-    <div className={`bg-white rounded-xl border overflow-hidden transition-all ${out ? 'opacity-40 border-slate-100' : 'border-slate-100 hover:border-blue-300 hover:shadow-md'}`}>
-      <button onClick={() => !out && onAdd(product, 'unit')} disabled={out} className="w-full p-3 text-left">
+    <div className={`bg-white rounded-xl border overflow-hidden transition-all flex flex-col ${out ? 'opacity-40 border-slate-100' : 'border-slate-100 hover:border-blue-300 hover:shadow-md'}`}>
+      {/* Product image + name + stock (not itself a button — buttons are below) */}
+      <div className="p-3 pb-2">
         <div className="flex items-center justify-center h-12 mb-2 rounded-lg overflow-hidden bg-slate-50">
-          {(product as any).image_data
-            ? <img src={(product as any).image_data} className="w-full h-full object-cover" />
+          {p.image_data
+            ? <img src={p.image_data} className="w-full h-full object-cover" />
             : <Package className="w-7 h-7 text-slate-200" />}
         </div>
         <p className="text-xs font-semibold text-slate-800 line-clamp-2 min-h-[2rem]">{product.name}</p>
-        <p className="text-sm font-bold text-blue-600 mt-1">
-          {currencySymbol}{product.selling_price.toFixed(2)}
-          <span className="text-xs font-normal text-slate-400 ml-0.5">/{product.unit}</span>
-        </p>
         <p className={`text-xs mt-0.5 ${out ? 'text-red-500' : low ? 'text-amber-500' : 'text-slate-400'}`}>
-          {out ? 'Out of stock' : low ? `Low: ${product.stock_qty}` : `${product.stock_qty} in stock`}
+          {out ? 'Out of stock' : low ? `Low: ${product.stock_qty} left` : `${product.stock_qty} in stock`}
         </p>
-      </button>
-      {(product as any).has_bulk_pricing && (product as any).bulk_unit && !out && (
-        <button
-          onClick={() => onAdd(product, 'bulk')}
-          className="w-full bg-amber-50 hover:bg-amber-100 border-t border-amber-100 px-3 py-1.5 text-xs font-medium text-amber-700 transition text-left"
-        >
-          📦 {currencySymbol}{(product as any).bulk_selling_price?.toFixed(2)}/{(product as any).bulk_unit}
-        </button>
+      </div>
+
+      {/* Add buttons — clearly labelled so any cashier knows which to tap */}
+      {!out && (
+        <div className="mt-auto border-t border-slate-100 divide-y divide-slate-100">
+          {hasUnit && (
+            <button
+              onClick={() => onAdd(product, 'unit')}
+              className="w-full flex items-center justify-between px-3 py-2 hover:bg-blue-50 transition text-left"
+            >
+              <span className="text-xs font-medium text-slate-600">
+                Add {product.unit}
+              </span>
+              <span className="text-sm font-bold text-blue-600">
+                {sym}{product.selling_price.toFixed(2)}
+              </span>
+            </button>
+          )}
+          {hasBulk && (
+            <button
+              onClick={() => onAdd(product, 'bulk')}
+              className="w-full flex items-center justify-between px-3 py-2 bg-amber-50/60 hover:bg-amber-100 transition text-left"
+            >
+              <span className="text-xs font-medium text-amber-700 flex items-center gap-1">
+                📦 Add {p.bulk_unit}
+                <span className="text-amber-500">({p.units_per_bulk} {product.unit})</span>
+              </span>
+              <span className="text-sm font-bold text-amber-700">
+                {sym}{p.bulk_selling_price?.toFixed(2)}
+              </span>
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
