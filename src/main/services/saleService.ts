@@ -109,33 +109,69 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
     `).run([input.served_by, id, `Receipt ${receiptNo}, Total ₦${input.total_amount}, VAT ${taxRateApplied}%`])
 
     // ── Auto price-switch check ───────────────────────────
-    // After every sale, check if any sold product has reached its pending price switch threshold.
+    // A product can have a PENDING price (set during restock with the
+    // "sell old stock first, then switch" option). The switch fires once
+    // the old stock has sold down to the recorded threshold quantity.
+    //
+    // A pending switch may carry a new UNIT price, a new BULK price, or
+    // both — so we trigger if EITHER pending price exists (not just unit).
+    // This makes the feature work for unit-only, bulk-only, and dual-price
+    // products alike.
+    //
+    // Only check products that were actually sold in THIS sale, since their
+    // stock just dropped and may have crossed the threshold.
+    const checkedProductIds = new Set<number>()
     for (const item of input.items) {
-      const p = db.prepare(
-        'SELECT stock_qty, pending_sell_price, pending_bulk_price, price_switch_at_qty FROM products WHERE id = ?'
-      ).get([item.product_id]) as {
-        stock_qty: number; pending_sell_price: number | null
-        pending_bulk_price: number | null; price_switch_at_qty: number | null
-      } | undefined
+      if (checkedProductIds.has(item.product_id)) continue   // avoid double-check
+      checkedProductIds.add(item.product_id)
 
-      if (p?.price_switch_at_qty != null && p?.pending_sell_price != null && p.stock_qty <= p.price_switch_at_qty) {
+      const p = db.prepare(
+        `SELECT stock_qty, selling_price, bulk_selling_price,
+                pending_sell_price, pending_bulk_price, price_switch_at_qty
+         FROM products WHERE id = ?`
+      ).get([item.product_id]) as {
+        stock_qty: number
+        selling_price: number
+        bulk_selling_price: number
+        pending_sell_price: number | null
+        pending_bulk_price: number | null
+        price_switch_at_qty: number | null
+      } | undefined
+      if (!p) continue
+
+      const hasPending = p.pending_sell_price != null || p.pending_bulk_price != null
+      const thresholdSet = p.price_switch_at_qty != null
+      const reachedThreshold = thresholdSet && p.stock_qty <= (p.price_switch_at_qty as number)
+
+      if (hasPending && reachedThreshold) {
+        // Apply whichever pending prices exist; keep current for the other.
+        const newSell = p.pending_sell_price ?? p.selling_price
+        const newBulk = p.pending_bulk_price ?? p.bulk_selling_price
+
         db.prepare(`
           UPDATE products SET
-            selling_price      = ?,
-            bulk_selling_price = COALESCE(?, bulk_selling_price),
-            pending_sell_price = NULL,
-            pending_bulk_price = NULL,
+            selling_price       = ?,
+            bulk_selling_price  = ?,
+            pending_sell_price  = NULL,
+            pending_bulk_price  = NULL,
             price_switch_at_qty = NULL,
             updated_at = datetime('now')
           WHERE id = ?
-        `).run([p.pending_sell_price, p.pending_bulk_price ?? null, item.product_id])
+        `).run([newSell, newBulk, item.product_id])
+
+        const parts: string[] = []
+        if (p.pending_sell_price != null) parts.push(`unit ₦${p.pending_sell_price}`)
+        if (p.pending_bulk_price != null) parts.push(`bulk ₦${p.pending_bulk_price}`)
 
         db.prepare(`
           INSERT INTO activity_log (user_id, action, entity_type, entity_id, detail)
           VALUES (?, 'product.price_auto_switch', 'product', ?, ?)
-        `).run([input.served_by, item.product_id, `Auto-switched price to ₦${p.pending_sell_price}`])
+        `).run([
+          input.served_by, item.product_id,
+          `Old stock sold out — auto-switched to ${parts.join(', ')} (at stock ${p.stock_qty})`,
+        ])
 
-        logger.info(`[SaleService] Auto price-switch triggered for product #${item.product_id}`)
+        logger.info(`[SaleService] Auto price-switch for product #${item.product_id}: ${parts.join(', ')}`)
       }
     }
 
