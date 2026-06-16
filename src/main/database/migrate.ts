@@ -389,6 +389,20 @@ UPDATE sales SET total_cost_amount = COALESCE((
 CREATE INDEX IF NOT EXISTS idx_sales_date_status ON sales(sale_date, status);
 CREATE INDEX IF NOT EXISTS idx_payments_method   ON payments(method);
 `,
+
+  '008_pricing_mode.sql': `
+-- ─── FLEXIBLE PRICING MODE ───────────────────────────────
+-- A product can be sold as:
+--   'unit'  → loose pieces only (default; uses selling_price)
+--   'both'  → loose pieces AND bulk (uses selling_price + bulk_selling_price)
+--   'bulk'  → bulk container only, no loose sale (uses bulk_selling_price)
+-- This lets stores be flexible: some goods sell only by carton, some only
+-- loose, some both. Existing rows are backfilled from has_bulk_pricing.
+ALTER TABLE products ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'unit';
+
+UPDATE products SET pricing_mode = 'both' WHERE has_bulk_pricing = 1;
+UPDATE products SET pricing_mode = 'unit' WHERE has_bulk_pricing = 0 OR has_bulk_pricing IS NULL;
+`,
 }
 
 
