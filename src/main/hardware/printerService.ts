@@ -89,6 +89,10 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   if (profile.receipt_footer) data.push(t(profile.receipt_footer, false, 'center', '12px'))
   data.push(t('Thank you for your patronage!', false, 'center', '12px'))
   data.push(t('Powered by Webautomate Nigeria', false, 'center', '10px'))
+  // Trailing feed — thermal cutters slice ~2-3 lines below the last print,
+  // so push blank lines to ensure the footer clears the blade.
+  data.push(t(' ', false, 'center', '10px'))
+  data.push(t(' ', false, 'center', '10px'))
   data.push(t(' ', false, 'center', '10px'))
 
   return data
@@ -136,10 +140,17 @@ export async function printSaleById(saleId: number): Promise<void> {
 
   await PosPrinter.print(content as any, {
     printerName,
-    preview:   false,
-    pageSize:  paperWidth as any,
-    copies:    1,
-    silent:    true,
+    preview:        false,
+    // Width only — let the height grow to fit the content (receipt roll).
+    // A fixed pageSize height is what cuts the bottom off; width-only +
+    // zero margins makes the print start at the very top and run full length.
+    width:          paperWidth === '58mm' ? '58mm' : '80mm',
+    margin:         '0 0 0 0',
+    copies:         1,
+    silent:         true,
+    timeOutPerLine: 400,
+    // Extra feed so the cutter doesn't slice the last lines.
+    pageSize:       undefined as any,
   })
 
   logger.info(`[Printer] Receipt printed: ${sale.receipt_no} → ${printerName}`)
@@ -157,8 +168,11 @@ export async function printRaw(content: unknown[]): Promise<void> {
   const PosPrinter = await getPrinter()
   await PosPrinter.print(content as any, {
     printerName,
-    preview:  false,
-    pageSize: paperWidth as any,
-    silent:   true,
+    preview:        false,
+    width:          paperWidth === '58mm' ? '58mm' : '80mm',
+    margin:         '0 0 0 0',
+    silent:         true,
+    timeOutPerLine: 400,
+    pageSize:       undefined as any,
   })
 }
