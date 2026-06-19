@@ -7,7 +7,8 @@ import ProductForm from './ProductForm'
 import StockAdjustModal from './StockAdjustModal'
 import StockReceiveModal from './StockReceiveModal'
 import BulkImportModal from './BulkImportModal'
-import { Plus, Edit2, Archive, BarChart2, Upload, Package } from 'lucide-react'
+import PriceUpdateModal from './PriceUpdateModal'
+import { Plus, Edit2, Archive, BarChart2, Upload, Package, TrendingUp } from 'lucide-react'
 
 export default function ProductList() {
   const { addToast, profile } = useAppStore()
@@ -20,6 +21,7 @@ export default function ProductList() {
   const [showForm, setShowForm] = useState(false)
   const [adjustProduct, setAdjustProduct] = useState<Product|null>(null)
   const [receiveProduct, setReceiveProduct] = useState<Product|null>(null)
+  const [priceProduct, setPriceProduct] = useState<Product|null>(null)
   const [showBulk, setShowBulk] = useState(false)
   const { addToast: _t } = useAppStore()
 
@@ -87,6 +89,7 @@ export default function ProductList() {
           <div className="flex items-center gap-1 justify-end">
 <button onClick={()=>setReceiveProduct(p)} className="p-1.5 text-slate-400 hover:text-green-600 rounded-lg" title="Receive stock"><Package className="w-4 h-4"/></button>
             <button onClick={()=>setAdjustProduct(p)} className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg" title="Adjust stock"><BarChart2 className="w-4 h-4"/></button>
+            <button onClick={()=>setPriceProduct(p)} className="p-1.5 text-slate-400 hover:text-amber-600 rounded-lg" title="Change price (market change)"><TrendingUp className="w-4 h-4"/></button>
             <button onClick={()=>{setEditProduct(p);setShowForm(true)}} className="p-1.5 text-slate-400 hover:text-green-600 rounded-lg"><Edit2 className="w-4 h-4"/></button>
             <button onClick={()=>handleArchive(p.id,p.name)} className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg"><Archive className="w-4 h-4"/></button>
           </div>
@@ -95,6 +98,7 @@ export default function ProductList() {
       {showForm && <ProductForm product={editProduct} categories={categories} onClose={()=>setShowForm(false)} onSaved={()=>{setShowForm(false);load()}}/>}
       {adjustProduct && <StockAdjustModal product={adjustProduct} onClose={()=>setAdjustProduct(null)} onSaved={()=>{setAdjustProduct(null);load()}}/>}
       {receiveProduct && <StockReceiveModal product={receiveProduct} onClose={()=>setReceiveProduct(null)} onSaved={()=>{setReceiveProduct(null);load()}}/> }
+      {priceProduct && <PriceUpdateModal product={priceProduct} onClose={()=>setPriceProduct(null)} onSaved={()=>{setPriceProduct(null);load()}}/>}
       {showBulk && <BulkImportModal onClose={()=>setShowBulk(false)} onSaved={()=>{setShowBulk(false);load()}}/>}
     </div>
   )
