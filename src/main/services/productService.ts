@@ -211,6 +211,94 @@ export function archiveProduct(db: DB, id: number): void {
 // ─── Receive stock (purchase receipt) ────────────────────
 export type PriceMode = 'keep' | 'switch_now' | 'auto_switch'
 
+// ─── Change price WITHOUT receiving stock ────────────────
+// For market-driven repricing (supplier raised prices, promo, etc.) that
+// has nothing to do with new stock arriving.
+//   mode 'now'         → new price applies immediately to all stock
+//   mode 'auto_switch' → current stock keeps the old price; the new price
+//                        activates once stock sells down to the threshold.
+//                        Threshold defaults to "sell ALL current stock first"
+//                        (switch when stock hits 0) unless after_qty is given.
+export interface PriceUpdateInput {
+  product_id:              number
+  mode:                    'now' | 'auto_switch'
+  new_selling_price?:      number    // unit price (omit to leave unit unchanged)
+  new_bulk_selling_price?: number    // bulk price (omit to leave bulk unchanged)
+  after_qty?:              number    // auto_switch: switch when stock <= this (default 0)
+  changed_by?:             number
+  reason?:                 string
+}
+
+export function updatePrice(db: DB, input: PriceUpdateInput): Product {
+  const p = db.prepare(
+    `SELECT stock_qty, selling_price, bulk_selling_price, cost_price FROM products WHERE id = ?`
+  ).get([input.product_id]) as {
+    stock_qty: number; selling_price: number; bulk_selling_price: number; cost_price: number
+  } | undefined
+  if (!p) throw new Error('Product not found')
+
+  const updates: string[] = [`updated_at = datetime('now')`]
+  const vals: unknown[] = []
+
+  if (input.mode === 'now') {
+    // Apply immediately and clear any pending switch.
+    if (input.new_selling_price != null) {
+      updates.push('selling_price = ?'); vals.push(input.new_selling_price)
+    }
+    if (input.new_bulk_selling_price != null) {
+      updates.push('bulk_selling_price = ?'); vals.push(input.new_bulk_selling_price)
+    }
+    updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
+  } else {
+    // auto_switch: hold the new price as pending; keep selling current stock
+    // at the old price until stock reaches the threshold (default 0 = sell all).
+    const threshold = input.after_qty ?? 0
+    if (p.stock_qty <= threshold) {
+      // Nothing to sell down first → apply immediately.
+      if (input.new_selling_price != null) { updates.push('selling_price = ?'); vals.push(input.new_selling_price) }
+      if (input.new_bulk_selling_price != null) { updates.push('bulk_selling_price = ?'); vals.push(input.new_bulk_selling_price) }
+      updates.push('pending_sell_price = NULL', 'pending_bulk_price = NULL', 'price_switch_at_qty = NULL')
+    } else {
+      updates.push('pending_sell_price = ?', 'pending_bulk_price = ?', 'price_switch_at_qty = ?')
+      vals.push(
+        input.new_selling_price      ?? null,
+        input.new_bulk_selling_price ?? null,
+        threshold,
+      )
+    }
+  }
+
+  vals.push(input.product_id)
+  db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals)
+
+  // Log to history (only the prices that actually changed)
+  const appliedNow = input.mode === 'now' || p.stock_qty <= (input.after_qty ?? 0)
+  db.prepare(`
+    INSERT INTO selling_price_history
+      (product_id, changed_by, old_cost_price, new_cost_price, old_sell_price, new_sell_price, old_bulk_price, new_bulk_price, reason)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run([
+    input.product_id, input.changed_by ?? null,
+    p.cost_price, p.cost_price,
+    p.selling_price,      input.new_selling_price      ?? p.selling_price,
+    p.bulk_selling_price, input.new_bulk_selling_price ?? p.bulk_selling_price,
+    input.reason ?? (input.mode === 'auto_switch' ? 'market_change_auto_switch' : 'market_change'),
+  ])
+
+  db.prepare(`
+    INSERT INTO activity_log (user_id, action, entity_type, entity_id, detail)
+    VALUES (?, 'product.price_update', 'product', ?, ?)
+  `).run([
+    input.changed_by ?? null, input.product_id,
+    appliedNow
+      ? `Price updated immediately (market change)`
+      : `New price set to activate when stock reaches ${input.after_qty ?? 0}`,
+  ])
+
+  logger.info(`[ProductService] Manual price update for product #${input.product_id} (${input.mode})`)
+  return getProductById(db, input.product_id)!
+}
+
 export interface StockReceiveInput {
   product_id:              number
   buy_mode:                'unit' | 'bulk'
