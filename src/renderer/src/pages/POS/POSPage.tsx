@@ -93,26 +93,42 @@ function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: Product,
 
 // ── Cart row ─────────────────────────────────────────────
 function CartRow({ item, flash }: { item: CartItem; flash?: boolean }) {
-  const { updateQty, removeItem, setItemDiscount, currencySymbol } = useCartStore()
+  const { updateQty, removeItem, setItemDiscount, changeMode, currencySymbol } = useCartStore()
   const [showDisc,  setShowDisc]  = useState(false)
   const [discInput, setDiscInput] = useState('')
   const mode    = item.sell_mode as SellMode
   const atLimit = item.quantity >= item.stock_qty
   const sku     = (item as any).sku as string | undefined
+  const it      = item as any
+  // Show the unit/pack dropdown only when the product genuinely sells both ways.
+  const canSwitchMode = it._pmode === 'both' && !!it._b_unit
 
   return (
     <div className={`group transition-colors ${flash ? 'bg-green-50' : 'hover:bg-slate-50'}`}>
       {/* Spreadsheet-style row: Item | Price | Qty | Total */}
       <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-px">
 
-        {/* Item cell (name + sku + per-unit price) */}
+        {/* Item cell (name + sku + unit/pack selector) */}
         <div className="px-2 py-1.5 min-w-0">
           <p className="text-sm font-medium text-slate-800 truncate">{item.product_name}</p>
-          <p className="text-[11px] text-slate-400 truncate">
-            {sku ? <span className="font-mono">{sku}</span> : null}
-            {sku ? ' · ' : ''}per {item.unit_label}
-            {item.discount_pct > 0 && <span className="text-amber-500 ml-1">−{item.discount_pct}%</span>}
-          </p>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            {sku && <span className="font-mono truncate">{sku}</span>}
+            {sku && <span>·</span>}
+            {canSwitchMode ? (
+              // Dropdown to switch this line between pcs and pack
+              <select
+                value={mode}
+                onChange={e => changeMode(item.product_id, mode, e.target.value as SellMode)}
+                className="text-[11px] border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-600 focus:border-blue-400 focus:outline-none cursor-pointer"
+              >
+                <option value="unit">pcs</option>
+                <option value="bulk">{it._b_unit} ({it._upb})</option>
+              </select>
+            ) : (
+              <span>per {item.unit_label}</span>
+            )}
+            {item.discount_pct > 0 && <span className="text-amber-500">−{item.discount_pct}%</span>}
+          </div>
         </div>
 
         {/* Price cell */}
