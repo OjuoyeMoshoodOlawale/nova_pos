@@ -128,16 +128,29 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
 
   // ── Change how the product is sold (unit / both / bulk) ──
   function onPricingModeChange(mode: 'unit' | 'both' | 'bulk') {
-    setD(prev => ({
-      ...prev,
-      pricing_mode:     mode,
-      has_bulk_pricing: mode !== 'unit',   // keep legacy flag in sync
-      // When bulk becomes active, derive unit cost from bulk if available
-      cost_price:
-        mode !== 'unit' && prev.bulk_buying_price > 0 && prev.units_per_bulk > 0
-          ? prev.bulk_buying_price / prev.units_per_bulk
-          : prev.cost_price,
-    }))
+    setD(prev => {
+      if (mode === 'bulk') {
+        // Bulk-only: the carton IS the unit. No pieces conversion.
+        // units_per_bulk = 1 so stock_qty directly = number of cartons,
+        // and the unit cost equals the bulk buying price.
+        return {
+          ...prev,
+          pricing_mode:     'bulk',
+          has_bulk_pricing: true,
+          units_per_bulk:   1,
+          cost_price:       prev.bulk_buying_price || prev.cost_price,
+        }
+      }
+      return {
+        ...prev,
+        pricing_mode:     mode,
+        has_bulk_pricing: mode !== 'unit',
+        cost_price:
+          mode === 'both' && prev.bulk_buying_price > 0 && prev.units_per_bulk > 0
+            ? prev.bulk_buying_price / prev.units_per_bulk
+            : prev.cost_price,
+      }
+    })
   }
 
   // When bulk unit changes, auto-fill units_per_bulk from known presets
@@ -197,15 +210,20 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
     if (!d.name.trim()) { addToast('error', 'Product name is required'); return }
 
     // Ensure cost_price is fully derived before saving
-    const bulkActive = d.pricing_mode !== 'unit'
+    const bulkOnly = d.pricing_mode === 'bulk'
+    const both     = d.pricing_mode === 'both'
     const payload = {
       ...d,
       pricing_mode:     d.pricing_mode,
-      has_bulk_pricing: bulkActive,        // keep legacy flag consistent
-      cost_price:
-        bulkActive && d.units_per_bulk > 0 && d.bulk_buying_price > 0
-          ? d.bulk_buying_price / d.units_per_bulk
-          : d.cost_price,
+      has_bulk_pricing: d.pricing_mode !== 'unit',
+      // Bulk-only: carton is the unit → units_per_bulk 1, cost = bulk price.
+      // Both: unit cost = bulk price ÷ pieces per carton.
+      units_per_bulk:   bulkOnly ? 1 : d.units_per_bulk,
+      cost_price:       bulkOnly
+        ? (d.bulk_buying_price || d.cost_price)
+        : (both && d.units_per_bulk > 0 && d.bulk_buying_price > 0
+            ? d.bulk_buying_price / d.units_per_bulk
+            : d.cost_price),
     }
 
     setSaving(true)
@@ -337,7 +355,42 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                 ))}
               </div>
 
-              {d.pricing_mode !== 'unit' ? (
+              {d.pricing_mode === 'bulk' ? (
+                /* ── BULK ONLY — keep it dead simple ──────────────
+                   The carton IS the unit. No pieces, no per-piece cost,
+                   no conversion. Just: what you call it, what you pay,
+                   what you sell it for. */
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">What do you sell it by?</label>
+                    <select
+                      className="input max-w-[260px]"
+                      value={d.bulk_unit}
+                      onChange={e => setD(prev => ({ ...prev, bulk_unit: e.target.value, units_per_bulk: 1 }))}
+                    >
+                      {BULK_UNITS.map(u => <option key={u}>{u}</option>)}
+                    </select>
+                    <p className="text-xs text-slate-400 mt-1">e.g. carton, bag, crate, sack</p>
+                  </div>
+                  <div>
+                    <label className="label">Buying Price ({sym}/{d.bulk_unit})</label>
+                    <div className="relative max-w-[260px]">
+                      <span className="absolute left-3 top-2.5 text-slate-400 text-sm">{sym}</span>
+                      <input
+                        type="number" step="0.01" min="0" className="input pl-8"
+                        value={d.bulk_buying_price || ''}
+                        onChange={e => {
+                          const v = parseFloat(e.target.value) || 0
+                          // carton is the unit → cost_price = bulk price, units_per_bulk = 1
+                          setD(prev => ({ ...prev, bulk_buying_price: v, cost_price: v, units_per_bulk: 1 }))
+                        }}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">What you pay for one {d.bulk_unit}</p>
+                  </div>
+                </div>
+              ) : d.pricing_mode === 'both' ? (
                 <>
                   {/* Step 1: Bulk unit + count */}
                   <div className="grid grid-cols-3 gap-3 items-end">
@@ -411,7 +464,7 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                   </div>
                 </>
               ) : (
-                /* No bulk: direct unit cost entry */
+                /* Pieces only: direct unit cost entry */
                 <div>
                   <label className="label">Unit Buying Price ({sym}/{d.unit})</label>
                   <div className="relative max-w-[260px]">
@@ -643,8 +696,11 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
                   type="number" step="0.01" min="0" className="input"
                   value={d.stock_qty || ''}
                   onChange={e => set('stock_qty', parseFloat(e.target.value) || 0)}
-                  placeholder={`qty in ${d.unit}`}
+                  placeholder={d.pricing_mode === 'bulk' ? `# of ${d.bulk_unit}s` : `qty in ${d.unit}`}
                 />
+              )}
+              {d.pricing_mode === 'bulk' && (
+                <p className="text-xs text-slate-400 mt-1">How many {d.bulk_unit}s you have in stock</p>
               )}
             </div>
 
