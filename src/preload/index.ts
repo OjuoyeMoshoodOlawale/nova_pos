@@ -79,6 +79,7 @@ const api = {
     getLowStock:        ()                          => invoke(CH.PRODUCT_LOW_STOCK),
     bulkImport:         (rows: unknown[], uid: number) => invoke(CH.PRODUCT_BULK_IMPORT, rows, uid),
     receiveStock:       (input: unknown)            => invoke('products:receiveStock', input),
+    updatePrice:        (input: unknown)            => invoke('products:updatePrice', input),
     priceHistory:       (id: number)                => invoke('products:priceHistory', id),
     priceChangeHistory: (id: number)                => invoke('products:priceChangeHistory', id),
   },
