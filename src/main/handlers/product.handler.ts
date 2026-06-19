@@ -21,6 +21,11 @@ export function registerProductHandlers(db: DB): void {
     productService.receiveStock(db, input as any)
   })
 
+  // ── Change price WITHOUT receiving stock (market changes) ──
+  safeHandle('products:updatePrice', (_e, input: unknown) => {
+    return productService.updatePrice(db, input as any)
+  })
+
   // ── Purchase price history ────────────────────────────
   // Returns every time this product was restocked:
   //   who recorded it, which supplier, cost at that time, qty received
