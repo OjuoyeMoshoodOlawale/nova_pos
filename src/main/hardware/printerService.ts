@@ -40,19 +40,24 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   if ((sale as any).customer_name) data.push(t(`Customer: ${(sale as any).customer_name}`, false, 'left', '12px'))
   data.push(divider())
 
-  data.push({
-    type: 'table',
-    tableHeader: ['ITEM', 'QTY', 'PRICE', 'TOTAL'],
-    tableBody: sale.items.map(item => [
-      item.product_name.slice(0, 20),
-      String(item.quantity),
-      `${sym}${item.unit_price.toFixed(2)}`,
-      `${sym}${item.line_total.toFixed(2)}`,
-    ]),
-    tableHeaderStyle: { border: 'none', fontSize: '11px', fontWeight: 'bold' },
-    tableBodyStyle:   { border: 'none', fontSize: '11px' },
-    style:            { width: '100%' },
-  })
+  // Items as text rows — table objects don't render on all 80mm drivers.
+  data.push(divider())
+  data.push(t('ITEM                QTY   TOTAL', true, 'left', '11px'))
+  for (const item of sale.items) {
+    const name = item.product_name.length > 18
+      ? item.product_name.slice(0, 18)
+      : item.product_name.padEnd(18, ' ')
+    const qty  = String(item.quantity).padStart(3, ' ')
+    const tot  = `${sym}${item.line_total.toFixed(2)}`.padStart(9, ' ')
+    // monospace alignment via a fixed-width font line
+    data.push({
+      type: 'text' as const,
+      value: `${name} ${qty} ${tot}`,
+      style: { fontSize: '11px', textAlign: 'left', fontFamily: 'monospace', whiteSpace: 'pre' },
+    })
+    // unit price as a small sub-line
+    data.push(t(`     @ ${sym}${item.unit_price.toFixed(2)} each`, false, 'left', '10px'))
+  }
 
   for (const item of sale.items) {
     if (item.discount_pct > 0) {
@@ -65,13 +70,15 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   if (sale.discount_amt > 0) rows.push([`Discount (${sale.discount_pct}%):`, `-${sym}${sale.discount_amt.toFixed(2)}`])
   if (sale.tax_amount   > 0) rows.push([`${profile.tax_name}:`, `${sym}${sale.tax_amount.toFixed(2)}`])
 
-  data.push({
-    type: 'table',
-    tableBody: rows.map(([k, v]) => [k, v]),
-    tableBodyStyle: { border: 'none', fontSize: '12px' },
-    style: { width: '100%' },
-  })
-  data.push(t(`TOTAL: ${sym}${sale.total_amount.toFixed(2)}`, true, 'right', '18px'))
+  // Totals as text rows (label left, amount right via padding)
+  for (const [k, v] of rows) {
+    data.push({
+      type: 'text' as const,
+      value: `${k.padEnd(20, ' ')}${v.padStart(12, ' ')}`,
+      style: { fontSize: '12px', textAlign: 'left', fontFamily: 'monospace', whiteSpace: 'pre' },
+    })
+  }
+  data.push(t(`TOTAL: ${sym}${sale.total_amount.toFixed(2)}`, true, 'right', '17px'))
   data.push(divider())
 
   for (const pmt of sale.payments) {
@@ -93,20 +100,8 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   // so push blank lines to ensure the footer clears the blade.
   data.push(t(' ', false, 'center', '10px'))
   data.push(t(' ', false, 'center', '10px'))
-  data.push(t(' ', false, 'center', '10px'))
 
   return data
-}
-
-// ─── Paper size in microns (reliable across driver versions) ──
-// The string preset '80mm' works on most setups, but some Windows drivers
-// fall back to A4 when only the preset is given — which makes Chromium spread
-// the receipt across many pages (the "endless small papers" bug). Passing an
-// explicit micron object avoids that fallback.
-function paperMicrons(width: string): { width: number; height: number } {
-  // 1mm = 1000 microns. Printable widths: 80mm roll ≈ 72mm, 58mm roll ≈ 48mm.
-  if (width === '58mm') return { width: 48000, height: 200000 }
-  return { width: 72000, height: 297000 }   // 80mm default
 }
 
 // ─── Resolve PosPrinter across import shapes ──────────────
@@ -156,7 +151,7 @@ export async function printSaleById(saleId: number): Promise<void> {
     copies:         1,
     silent:         true,
     timeOutPerLine: 400,
-    pageSize:       paperMicrons(paperWidth) as any,
+    pageSize:       (paperWidth === '58mm' ? '58mm' : '80mm') as any,
   })
 
   logger.info(`[Printer] Receipt printed: ${sale.receipt_no} → ${printerName}`)
@@ -179,6 +174,6 @@ export async function printRaw(content: unknown[]): Promise<void> {
     copies:         1,
     silent:         true,
     timeOutPerLine: 400,
-    pageSize:       paperMicrons(paperWidth) as any,
+    pageSize:       (paperWidth === '58mm' ? '58mm' : '80mm') as any,
   })
 }
