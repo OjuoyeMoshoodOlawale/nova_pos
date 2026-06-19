@@ -276,21 +276,26 @@ export default function POSPage() {
   async function handleSaleComplete(saleId: number, receiptNo: string) {
     setShowPayment(false)
     cart.clearCart()
-    addToast('success', `Sale ${receiptNo} complete!`)
 
-    // ── Auto-print receipt ────────────────────────────────
-    // Controlled by Settings → auto_print_receipt (default ON).
-    // Print failures must never block the next sale — fire & forget
-    // with a soft toast so the cashier can reprint from Sales page.
+    // ── Print receipt right after checkout, then toast ────
+    // Auto-print is ON by default (Settings → auto_print_receipt).
+    // Printing never blocks the next sale — if it fails, the sale
+    // still succeeded and the cashier can reprint from the Sales page.
+    let printed = false
     try {
       const sRes = await window.api.settings.getAll()
       const autoPrint = !sRes.success || sRes.data?.auto_print_receipt !== 'false'
       if (autoPrint) {
-        window.api.hardware.printSale(saleId).then((pr: any) => {
-          if (!pr.success) addToast('error', `Receipt print failed: ${pr.error || 'check printer in Settings'}`)
-        })
+        const pr = await window.api.hardware.printSale(saleId)
+        printed = !!pr.success
+        if (!pr.success) {
+          addToast('error', `Receipt print failed: ${pr.error || 'check printer in Settings'}`)
+        }
       }
     } catch { /* never block checkout on printing */ }
+
+    addToast('success',
+      printed ? `Sale ${receiptNo} complete — receipt printed` : `Sale ${receiptNo} complete!`)
 
     // Refresh stock levels and cashier stats after each sale
     const r = await window.api.products.getAll()
