@@ -50,8 +50,7 @@ export default function CheckoutBar() {
 
   const inputRef    = useRef<HTMLInputElement>(null)
   const lastKeyTime = useRef(0)
-  const scanBuffer  = useRef('')
-  const scanMode    = useRef(false)
+  const fastCharCount = useRef(0)   // consecutive fast keystrokes = scanner burst
   const searchTimer = useRef<ReturnType<typeof setTimeout>>()
   const onScanRef   = useRef<(code: string) => void>(() => {})
 
@@ -88,8 +87,7 @@ export default function CheckoutBar() {
     setStatus('found')
     setShowDrop(false)
     setValue('')
-    scanBuffer.current = ''
-    scanMode.current   = false
+    fastCharCount.current = 0
     beep(true)
     setTimeout(() => { setStatus('ready'); setLastMsg('') }, 2500)
   }
@@ -153,64 +151,66 @@ export default function CheckoutBar() {
   }
 
   // ── Key detection — scanner vs human typing ───────────
-  const SCAN_THRESHOLD_MS = 100
+  // A USB scanner types the whole barcode in a rapid burst (each keystroke
+  // <~30ms apart) and finishes with Enter. A human types far slower.
+  //
+  // We do NOT try to rebuild the code character-by-character (that loses the
+  // first char, whose gap is always large). Instead we read the COMPLETE
+  // input value on Enter and decide scan-vs-search by how fast it was entered.
+  const SCAN_CHAR_GAP_MS = 35   // typical scanner inter-key gap is 5–20ms
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     const now = Date.now()
     const gap = now - lastKeyTime.current
     lastKeyTime.current = now
 
-    if (e.key.length === 1 && gap < SCAN_THRESHOLD_MS) {
-      scanBuffer.current += e.key
-      scanMode.current    = true
+    // Track whether the burst so far looks machine-fast.
+    if (e.key.length === 1) {
+      if (gap < SCAN_CHAR_GAP_MS) {
+        fastCharCount.current += 1
+      } else {
+        fastCharCount.current = 0   // a slow keystroke resets the burst
+      }
     }
 
     if (e.key === 'Enter') {
       e.preventDefault()
-      const buf = scanBuffer.current.trim()
+      const code = value.trim()
+      // Treat as a SCAN if the value arrived as a fast burst (scanner) OR
+      // the user pressed Enter on a typed code they want to look up directly.
+      const looksScanned = fastCharCount.current >= 2
 
-      if (scanMode.current && buf.length >= 2) {
-        onScanRef.current(buf)
-        scanBuffer.current = ''
-        scanMode.current   = false
+      if (code.length >= 2 && (looksScanned || results.length === 0)) {
+        // Direct barcode lookup (scanner, or Enter on a code with no matches)
+        onScanRef.current(code)
         setValue('')
-        clearTimeout(searchTimer.current)
         setShowDrop(false)
+        clearTimeout(searchTimer.current)
       } else if (results.length > 0) {
+        // Enter on a search with visible matches → take the first result
         addProduct(results[0])
-      } else if (value.trim().length >= 2) {
-        onScanRef.current(value.trim())
         setValue('')
+        setShowDrop(false)
       }
+      fastCharCount.current = 0
       return
     }
 
     if (e.key === 'Escape') {
-      setValue(''); scanBuffer.current = ''; scanMode.current = false
+      setValue(''); fastCharCount.current = 0
       setShowDrop(false); setResults([]); clearBulkChoice()
-      return
     }
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const v   = e.target.value
-    const now = Date.now()
-    const gap = now - lastKeyTime.current
-
+    const v = e.target.value
     setValue(v)
 
-    if (gap < SCAN_THRESHOLD_MS) {
-      scanBuffer.current = v
-      scanMode.current   = true
-      clearTimeout(searchTimer.current)
-      return
-    }
-
-    scanMode.current   = false
-    scanBuffer.current = ''
+    // Live search as the user types (debounced). A scanner finishes with
+    // Enter before this fires, so scanned codes never trigger a search.
     clearTimeout(searchTimer.current)
     if (v.trim().length >= 1) {
-      searchTimer.current = setTimeout(() => doSearch(v), 280)
+      searchTimer.current = setTimeout(() => doSearch(v), 250)
     } else {
       setResults([]); setShowDrop(false)
     }
