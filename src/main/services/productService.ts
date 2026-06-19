@@ -57,7 +57,28 @@ export function getProductById(db: DB, id: number): Product | null {
 }
 
 export function findByBarcode(db: DB, barcode: string): Product | null {
-  const row = db.prepare(`${SELECT} WHERE p.barcode = ? AND p.is_active = 1`).get([barcode]) as any
+  // Scanners can append/precede whitespace or control chars — normalise.
+  const code = String(barcode).trim()
+  if (!code) return null
+
+  // 1) Exact barcode match (the normal case)
+  let row = db.prepare(`${SELECT} WHERE p.barcode = ? AND p.is_active = 1`).get([code]) as any
+
+  // 2) Fall back to SKU match — many shops scan their own SKU labels, or
+  //    enter the SKU by hand at the register.
+  if (!row) {
+    row = db.prepare(`${SELECT} WHERE p.sku = ? AND p.is_active = 1`).get([code]) as any
+  }
+
+  // 3) Tolerate a leading zero difference (EAN-13 vs UPC-A, common with
+  //    cheap scanners that drop or add a leading 0).
+  if (!row && /^\d+$/.test(code)) {
+    row = db.prepare(`${SELECT} WHERE p.barcode = ? AND p.is_active = 1`).get(['0' + code]) as any
+    if (!row && code.startsWith('0')) {
+      row = db.prepare(`${SELECT} WHERE p.barcode = ? AND p.is_active = 1`).get([code.replace(/^0+/, '')]) as any
+    }
+  }
+
   return row ? toProduct(row) : null
 }
 
