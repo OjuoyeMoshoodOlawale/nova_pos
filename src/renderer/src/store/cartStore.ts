@@ -21,6 +21,7 @@ interface CartState {
   addItem:         (product:Product, mode?:SellMode) => 'added'|'at_limit'|'out_of_stock'
   removeItem:      (productId:number, mode?:SellMode) => void
   updateQty:       (productId:number, mode:SellMode, qty:number) => void
+  changeMode:      (productId:number, fromMode:SellMode, toMode:SellMode) => void
   setItemDiscount: (productId:number, mode:SellMode, pct:number) => void
   setOrderDiscount:(pct:number) => void
   setCustomer:     (id:number|null, name:string|null, groupDiscount?:number) => void
@@ -97,6 +98,16 @@ export const useCartStore = create<CartState>((set, get) => ({
         unit_price: effectivePrice, quantity: 1, discount_pct: effectiveDisc,
         line_total: effectivePrice, cost_price: costPrice,
         sell_mode: mode, unit_label: unitLabel, stock_qty: stockQty,
+        // Full pricing snapshot so the cart row can switch unit↔pack later
+        // without re-querying the product.
+        _u_price: product.selling_price,
+        _u_cost:  product.cost_price,
+        _b_price: product.bulk_selling_price,
+        _b_cost:  product.bulk_buying_price,
+        _b_unit:  (product as any).bulk_unit ?? null,
+        _upb:     (product as any).units_per_bulk ?? 1,
+        _pmode:   (product as any).pricing_mode
+                    ?? ((product as any).has_bulk_pricing && (product as any).bulk_unit ? 'both' : 'unit'),
       } as any
       return { items: [...s.items, newItem] }
     })
@@ -107,6 +118,58 @@ export const useCartStore = create<CartState>((set, get) => ({
   removeItem(productId, mode = 'unit') {
     const key = itemKey(productId, mode)
     set(s => ({ items: s.items.filter(i => itemKey(i.product_id, i.sell_mode as SellMode) !== key) }))
+  },
+
+  // Switch a cart line between unit (pcs) and bulk (pack) in place,
+  // recomputing price, cost, and the stock cap from the stored snapshot.
+  changeMode(productId, fromMode, toMode) {
+    if (fromMode === toMode) return
+    const fromKey = itemKey(productId, fromMode)
+    const toKey   = itemKey(productId, toMode)
+    set(s => {
+      const item: any = s.items.find(i => itemKey(i.product_id, i.sell_mode as SellMode) === fromKey)
+      if (!item) return s
+
+      const isBulk    = toMode === 'bulk'
+      const newPrice  = isBulk ? (item._b_price ?? 0) : (item._u_price ?? 0)
+      const newCost   = isBulk ? (item._b_cost  ?? 0) : (item._u_cost  ?? 0)
+      const newLabel  = isBulk ? (item._b_unit || 'pack') : 'pcs'
+      const disc      = item.discount_pct || 0
+      const effPrice  = +(newPrice * (1 - disc / 100)).toFixed(2)
+
+      // If a line for the target mode already exists, merge into it.
+      const existingTarget = s.items.find(i => itemKey(i.product_id, i.sell_mode as SellMode) === toKey)
+      if (existingTarget) {
+        return {
+          items: s.items
+            .filter(i => itemKey(i.product_id, i.sell_mode as SellMode) !== fromKey)
+            .map(i => itemKey(i.product_id, i.sell_mode as SellMode) === toKey
+              ? { ...i, quantity: Math.min(i.quantity + item.quantity, i.stock_qty),
+                  line_total: lineTotal(i.unit_price, Math.min(i.quantity + item.quantity, i.stock_qty), i.discount_pct) }
+              : i)
+        }
+      }
+
+      const cappedQty = Math.min(item.quantity, item.stock_qty)
+      // Stock cap differs by mode: in bulk, the cap is how many packs the
+      // piece-stock can make (floor(stock / units_per_bulk)).
+      const modeCap = isBulk
+        ? Math.max(1, Math.floor((item.stock_qty || 0) / (item._upb || 1)))
+        : item.stock_qty
+      const finalQty = Math.min(cappedQty, modeCap)
+      return {
+        items: s.items.map(i => itemKey(i.product_id, i.sell_mode as SellMode) === fromKey
+          ? { ...i,
+              sell_mode:  toMode,
+              unit_price: effPrice,
+              cost_price: newCost,
+              unit_label: newLabel,
+              stock_qty:  modeCap,
+              quantity:   finalQty,
+              line_total: lineTotal(effPrice, finalQty, disc) }
+          : i)
+      }
+    })
   },
 
   updateQty(productId, mode, qty) {
