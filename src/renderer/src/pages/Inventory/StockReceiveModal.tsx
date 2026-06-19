@@ -75,7 +75,12 @@ export default function StockReceiveModal({ product: initProduct, onClose, onSav
   const [bulkSellEnabled,  setBulkSellEnabled]  = useState(true)
   const [unitSellPrice,    setUnitSellPrice]    = useState(0)
   const [bulkSellPrice,    setBulkSellPrice]    = useState(0)
-  const [priceMode,        setPriceMode]        = useState<PriceMode>('switch_now')
+  // Smart default: if there's existing stock, default to "sell old stock
+  // first, then auto-switch" (the usual intent when restocking at a new
+  // price). With no old stock, "switch now" makes more sense.
+  const [priceMode,        setPriceMode]        = useState<PriceMode>(
+    (product?.stock_qty ?? 0) > 0 ? 'auto_switch' : 'switch_now'
+  )
 
   const [saving, setSaving] = useState(false)
 
