@@ -98,6 +98,17 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   return data
 }
 
+// ─── Paper size in microns (reliable across driver versions) ──
+// The string preset '80mm' works on most setups, but some Windows drivers
+// fall back to A4 when only the preset is given — which makes Chromium spread
+// the receipt across many pages (the "endless small papers" bug). Passing an
+// explicit micron object avoids that fallback.
+function paperMicrons(width: string): { width: number; height: number } {
+  // 1mm = 1000 microns. Printable widths: 80mm roll ≈ 72mm, 58mm roll ≈ 48mm.
+  if (width === '58mm') return { width: 48000, height: 200000 }
+  return { width: 72000, height: 297000 }   // 80mm default
+}
+
 // ─── Resolve PosPrinter across import shapes ──────────────
 // electron-pos-printer can export { PosPrinter } (named) or
 // { default: { PosPrinter } } (default-wrapped), depending
@@ -145,7 +156,7 @@ export async function printSaleById(saleId: number): Promise<void> {
     copies:         1,
     silent:         true,
     timeOutPerLine: 400,
-    pageSize:       (paperWidth === '58mm' ? '58mm' : '80mm') as any,
+    pageSize:       paperMicrons(paperWidth) as any,
   })
 
   logger.info(`[Printer] Receipt printed: ${sale.receipt_no} → ${printerName}`)
@@ -168,6 +179,6 @@ export async function printRaw(content: unknown[]): Promise<void> {
     copies:         1,
     silent:         true,
     timeOutPerLine: 400,
-    pageSize:       (paperWidth === '58mm' ? '58mm' : '80mm') as any,
+    pageSize:       paperMicrons(paperWidth) as any,
   })
 }
