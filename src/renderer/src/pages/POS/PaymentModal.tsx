@@ -31,6 +31,16 @@ export default function PaymentModal({totals, onClose, onSuccess}: Props) {
 
   async function handlePay() {
     if (!user) return
+    // Guard: cash tendered must cover the total. Prevents recording a sale as
+    // paid when the customer hasn't given enough (use a proper credit flow for
+    // part-payments instead).
+    if (method === 'cash') {
+      const paid = parseFloat(tendered || '0')
+      if (paid < totals.total) {
+        addToast('error', `Amount paid (${sym}${paid.toFixed(2)}) is less than the total (${sym}${totals.total.toFixed(2)})`)
+        return
+      }
+    }
     setProcessing(true)
     const input = {
       items: cart.items,
