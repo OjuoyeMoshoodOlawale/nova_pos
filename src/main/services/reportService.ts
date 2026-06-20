@@ -21,11 +21,12 @@ export function buildDailyReport(db: DB, date: string): DailyReportData {
   const e = `${date} 23:59:59`
 
   const totals = db.prepare(`
-    SELECT COALESCE(SUM(total_amount),0) AS totalRevenue,
-           COUNT(*) AS transactionCount,
-           COALESCE(SUM(discount_amt),0) AS discountGiven,
-           COALESCE(SUM(tax_amount),0) AS taxCollected,
-           SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END) AS voidCount
+    SELECT
+      COALESCE(SUM(CASE WHEN status='completed' THEN total_amount ELSE 0 END),0) AS totalRevenue,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS transactionCount,
+      COALESCE(SUM(CASE WHEN status='completed' THEN discount_amt ELSE 0 END),0) AS discountGiven,
+      COALESCE(SUM(CASE WHEN status='completed' THEN tax_amount ELSE 0 END),0) AS taxCollected,
+      SUM(CASE WHEN status='voided' THEN 1 ELSE 0 END) AS voidCount
     FROM sales WHERE sale_date BETWEEN ? AND ? AND status != 'held'
   `).get([s, e]) as { totalRevenue:number; transactionCount:number; discountGiven:number; taxCollected:number; voidCount:number }
 
