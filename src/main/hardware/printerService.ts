@@ -26,9 +26,7 @@ function divider(char = '─', count = 32) { return t(char.repeat(count), false,
 
 export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile): Record<string, unknown>[] {
   const sym  = profile.currency_symbol || '₦'
-  const data: Record<string, unknown>[] = []
-
-  if (profile.receipt_header) data.push(t(profile.receipt_header, false, 'center', '12px'))
+  const data: Record<string, unknown>[] = []  if (profile.receipt_header) data.push(t(profile.receipt_header, false, 'center', '12px'))
   data.push(t(profile.name, true, 'center', '18px'))
   if (profile.address) data.push(t(profile.address, false, 'center', '11px'))
   if (profile.phone)   data.push(t(profile.phone,   false, 'center', '11px'))
