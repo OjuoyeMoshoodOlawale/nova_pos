@@ -444,7 +444,16 @@ export function runMigrations(db: DB): void {
       count++
       logger.info(`[Migrate] Applied: ${name}`)
     } catch (err) {
-      logger.error(`[Migrate] FAILED on ${name}: ${(err as Error).message}`)
+      const msg = (err as Error).message || ''
+      // ADD COLUMN is idempotent in intent. If a column already exists (e.g.
+      // a re-installed build or a partially-applied migration), don't crash
+      // startup — record the migration as applied and continue.
+      if (/duplicate column name/i.test(msg)) {
+        try { db.prepare('INSERT OR IGNORE INTO _migrations (name) VALUES (?)').run([name]) } catch { /* ignore */ }
+        logger.warn(`[Migrate] ${name}: column already exists — marking as applied`)
+        continue
+      }
+      logger.error(`[Migrate] FAILED on ${name}: ${msg}`)
       throw err
     }
   }
