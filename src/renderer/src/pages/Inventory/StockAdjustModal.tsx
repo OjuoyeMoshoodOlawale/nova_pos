@@ -4,7 +4,9 @@ import { useAuthStore } from '../../store/authStore'
 import { useAppStore } from '../../store/appStore'
 import { X, TrendingUp, TrendingDown } from 'lucide-react'
 
-const REASONS = ['restock','damage','theft','correction','return'] as const
+// Stock ADJUSTMENT reasons are for fixing wrong counts only — NOT for adding
+// purchased stock (use Receive Stock for that, so cost is recorded).
+const REASONS = ['damage','theft','expired','correction','return'] as const
 
 interface Props { product:Product; onClose:()=>void; onSaved:()=>void }
 export default function StockAdjustModal({product, onClose, onSaved}: Props) {
@@ -12,7 +14,7 @@ export default function StockAdjustModal({product, onClose, onSaved}: Props) {
   const {addToast, profile} = useAppStore()
   const [qty, setQty] = useState('')
   const [type, setType] = useState<'add'|'remove'>('add')
-  const [reason, setReason] = useState('restock')
+  const [reason, setReason] = useState('correction')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const sym = profile?.currency_symbol ?? '₦'
