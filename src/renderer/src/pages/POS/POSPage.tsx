@@ -1,5 +1,5 @@
 // src/renderer/src/pages/POS/POSPage.tsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useCartStore }  from '../../store/cartStore'
 import { useAuthStore }  from '../../store/authStore'
 import { useAppStore }   from '../../store/appStore'
@@ -205,6 +205,13 @@ export default function POSPage() {
   const [discInput,     setDiscInput]     = useState('')
   const [flashKey,      setFlashKey]      = useState<string | null>(null)
   const [cashierStats,  setCashierStats]  = useState<CashierStats | null>(null)
+
+  // Cart auto-scroll: keep the newest item visible at the bottom.
+  const cartScrollRef = useRef<HTMLDivElement>(null)
+  const cartEndRef    = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    cartEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [cart.items.length])
 
   const totals = cart.getTotals()
 
@@ -433,7 +440,7 @@ export default function POSPage() {
           </div>
 
           {/* Cart items — Excel-style grid */}
-          <div className="flex-1 overflow-y-auto px-2 py-2">
+          <div ref={cartScrollRef} className="flex-1 overflow-y-scroll px-2 py-2 cart-scroll">
             {cart.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-300 py-12">
                 <ShoppingCart className="w-12 h-12 mb-3" />
@@ -442,12 +449,12 @@ export default function POSPage() {
               </div>
             ) : (
               <div className="border border-slate-200 rounded-lg overflow-hidden">
-                {/* Header row (like a spreadsheet) */}
-                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-px bg-slate-200 text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-                  <div className="bg-slate-50 px-2 py-1.5">Item</div>
-                  <div className="bg-slate-50 px-2 py-1.5 text-right w-20">Price</div>
-                  <div className="bg-slate-50 px-2 py-1.5 text-center w-24">Qty</div>
-                  <div className="bg-slate-50 px-2 py-1.5 text-right w-20">Total</div>
+                {/* Header row (sticky, like a spreadsheet) */}
+                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-px bg-slate-200 text-[10px] font-semibold text-slate-500 uppercase tracking-wide sticky top-0 z-10">
+                  <div className="bg-slate-100 px-2 py-1.5">Item</div>
+                  <div className="bg-slate-100 px-2 py-1.5 text-right w-20">Price</div>
+                  <div className="bg-slate-100 px-2 py-1.5 text-center w-24">Qty</div>
+                  <div className="bg-slate-100 px-2 py-1.5 text-right w-20">Total</div>
                 </div>
                 {/* Data rows */}
                 <div className="divide-y divide-slate-100 bg-white">
@@ -458,6 +465,8 @@ export default function POSPage() {
                       flash={flashKey === cart.getItemKey(item.product_id, item.sell_mode as SellMode)}
                     />
                   ))}
+                  {/* anchor for auto-scroll to last item */}
+                  <div ref={cartEndRef} />
                 </div>
               </div>
             )}
