@@ -98,7 +98,8 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   data.push(t('Powered by Webautomate Nigeria', false, 'center', '10px'))
   // Trailing feed — thermal cutters slice ~2-3 lines below the last print,
   // so push blank lines to ensure the footer clears the blade.
-  data.push(t(' ', false, 'center', '10px'))
+  // ──────────────────────────────────────────────────────
+  // Footer spacing (1 blank line)
   data.push(t(' ', false, 'center', '10px'))
 
   return data
@@ -150,7 +151,7 @@ export async function printSaleById(saleId: number): Promise<void> {
     margin:         '0 0 0 0',     // start at the very top, no side gaps
     copies:         1,
     silent:         true,
-    timeOutPerLine: 400,
+    timeOutPerLine: 700,
     pageSize:       (paperWidth === '58mm' ? '58mm' : '80mm') as any,
   })
 
