@@ -16,7 +16,6 @@ export function generateReceiptNo(db: DB): string {
 }
 
 export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResult {
-  const receiptNo  = generateReceiptNo(db)
   const amountPaid = input.payments.reduce((s, p) => s + p.amount, 0)
   const change     = Math.max(0, amountPaid - input.total_amount)
   const subtotal   = input.items.reduce((s, i) => s + i.line_total, 0) + input.discount_amt
@@ -32,7 +31,12 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
   const taxRateApplied      = taxProfile?.tax_rate     ?? 7.5
   const taxInclusiveApplied = taxProfile?.tax_inclusive ?  1  : 0
 
+  // Receipt number is generated INSIDE the transaction (below) so that two
+  // terminals on a LAN can't read the same "last" number and collide.
+  let receiptNo = ''
+
   const saleId = withTx(db, () => {
+    receiptNo = generateReceiptNo(db)
     // ── Build full item snapshot BEFORE inserting ─────────
     // items_json stores everything needed to reprint/audit this sale
     // even if products are renamed, repriced, or deleted later.
