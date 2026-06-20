@@ -301,6 +301,12 @@ export function buildInsights(db: DB, windowDays = 30) {
     .filter(p => p.days_left != null && p.stock_qty > 0)
     .sort((a, b) => (a.days_left as number) - (b.days_left as number))
     .slice(0, 10)
+    .map(p => ({
+      ...p,
+      // Suggest ordering enough to cover ~30 days of sales, minus what's left.
+      // e.g. sells 6/day → 30 days needs 180; if 45 in stock, order 135.
+      suggested_order: Math.max(0, Math.ceil(p.per_day * 30 - p.stock_qty)),
+    }))
   // Dead stock — in stock but ZERO sales in the window
   const deadStock = enriched
     .filter(p => p.units_sold === 0 && p.stock_qty > 0)
