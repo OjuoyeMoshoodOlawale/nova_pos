@@ -22,6 +22,7 @@ export default function InsightsPanel() {
   const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [stockQuery, setStockQuery] = useState('')
+  const [moveQuery, setMoveQuery] = useState('')
 
   const [error, setError] = useState<string | null>(null)
 
@@ -72,6 +73,9 @@ export default function InsightsPanel() {
       : 'text-green-600'
 
   // Live stock list, filtered + sorted low→high so the scarce items surface
+  const movement = (data?.movement ?? [])
+    .filter((p: any) => p.name.toLowerCase().includes(moveQuery.toLowerCase()))
+
   const liveStock = products
     .filter(p => p.name.toLowerCase().includes(stockQuery.toLowerCase()))
     .sort((a, b) => a.stock_qty - b.stock_qty)
@@ -237,6 +241,54 @@ export default function InsightsPanel() {
               ))}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Stock Movement — purchased vs sold vs remaining (manager audit view) */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold text-slate-800">Stock Movement</h3>
+            <p className="text-xs text-slate-400">Purchased vs sold vs remaining — for verifying the books</p>
+          </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5" />
+            <input value={moveQuery} onChange={e => setMoveQuery(e.target.value)}
+              placeholder="Search product…" className="input pl-8 py-1.5 text-sm w-48" />
+          </div>
+        </div>
+        <div className="max-h-96 overflow-y-auto cart-scroll">
+          <table className="w-full text-sm">
+            <thead className="text-[11px] text-slate-400 uppercase sticky top-0 bg-white">
+              <tr className="border-b border-slate-100">
+                <th className="text-left py-2 font-medium">Product</th>
+                <th className="text-right py-2 font-medium">Purchased</th>
+                <th className="text-right py-2 font-medium">Sold</th>
+                <th className="text-right py-2 font-medium">Remaining</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movement.map((p: any) => (
+                <tr key={p.id} className="border-b border-slate-50">
+                  <td className="py-2 text-slate-700 truncate max-w-[180px]">{p.name}</td>
+                  <td className="py-2 text-right tabular-nums">
+                    <span className="text-slate-700">{p.total_purchased} {p.unit}</span>
+                    {p.has_bulk && <span className="block text-[10px] text-slate-400">{p.purchased_packs} {p.bulk_unit}</span>}
+                  </td>
+                  <td className="py-2 text-right tabular-nums">
+                    <span className="text-slate-700">{p.units_sold} {p.unit}</span>
+                    {p.has_bulk && <span className="block text-[10px] text-slate-400">{p.sold_packs} {p.bulk_unit}</span>}
+                  </td>
+                  <td className="py-2 text-right tabular-nums">
+                    <span className={`font-semibold ${p.stock_qty <= 0 ? 'text-red-600' : p.stock_qty <= p.reorder_level ? 'text-amber-600' : 'text-green-600'}`}>
+                      {p.stock_qty} {p.unit}
+                    </span>
+                    {p.has_bulk && <span className="block text-[10px] text-slate-400">{p.remaining_packs} {p.bulk_unit}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
