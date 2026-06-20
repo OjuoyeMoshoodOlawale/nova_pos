@@ -29,9 +29,26 @@ export function buildDailyReport(db: DB, date: string): DailyReportData {
     FROM sales WHERE sale_date BETWEEN ? AND ? AND status != 'held'
   `).get([s, e]) as { totalRevenue:number; transactionCount:number; discountGiven:number; taxCollected:number; voidCount:number }
 
+  // COGS: prefer the per-sale snapshot (sales.total_cost_amount, migration 007)
+  // which is already correct for bulk. Fall back to recomputing from
+  // sale_items ONLY for pre-007 rows, multiplying bulk lines by units_per_bulk
+  // so cartons are costed in pieces.
   const cogs = db.prepare(`
-    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS totalCost
-    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    SELECT COALESCE(SUM(
+      CASE WHEN s.total_cost_amount > 0 THEN s.total_cost_amount
+           ELSE (
+             SELECT COALESCE(SUM(
+               si.quantity *
+               CASE WHEN si.sell_mode = 'bulk' THEN COALESCE(p.units_per_bulk, 1) ELSE 1 END *
+               si.cost_price
+             ), 0)
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id
+             WHERE si.sale_id = s.id
+           )
+      END
+    ), 0) AS totalCost
+    FROM sales s
     WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
   `).get([s, e]) as { totalCost: number }
 
@@ -88,9 +105,26 @@ export function buildMonthlyReport(db: DB, year: number, month: number): Monthly
     FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
   `).get([s, e]) as { totalRevenue: number; totalTransactions: number }
 
+  // COGS: prefer the per-sale snapshot (sales.total_cost_amount, migration 007)
+  // which is already correct for bulk. Fall back to recomputing from
+  // sale_items ONLY for pre-007 rows, multiplying bulk lines by units_per_bulk
+  // so cartons are costed in pieces.
   const cogs = db.prepare(`
-    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS totalCost
-    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    SELECT COALESCE(SUM(
+      CASE WHEN s.total_cost_amount > 0 THEN s.total_cost_amount
+           ELSE (
+             SELECT COALESCE(SUM(
+               si.quantity *
+               CASE WHEN si.sell_mode = 'bulk' THEN COALESCE(p.units_per_bulk, 1) ELSE 1 END *
+               si.cost_price
+             ), 0)
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id
+             WHERE si.sale_id = s.id
+           )
+      END
+    ), 0) AS totalCost
+    FROM sales s
     WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
   `).get([s, e]) as { totalCost: number }
 
@@ -145,9 +179,26 @@ export function buildYearlyReport(db: DB, year: number) {
     FROM sales WHERE sale_date BETWEEN ? AND ? AND status = 'completed'
   `).get([s, e]) as { totalRevenue:number; totalTransactions:number; totalDiscounts:number; totalTax:number }
 
+  // COGS: prefer the per-sale snapshot (sales.total_cost_amount, migration 007)
+  // which is already correct for bulk. Fall back to recomputing from
+  // sale_items ONLY for pre-007 rows, multiplying bulk lines by units_per_bulk
+  // so cartons are costed in pieces.
   const cogs = db.prepare(`
-    SELECT COALESCE(SUM(si.quantity * si.cost_price),0) AS totalCost
-    FROM sale_items si JOIN sales s ON si.sale_id = s.id
+    SELECT COALESCE(SUM(
+      CASE WHEN s.total_cost_amount > 0 THEN s.total_cost_amount
+           ELSE (
+             SELECT COALESCE(SUM(
+               si.quantity *
+               CASE WHEN si.sell_mode = 'bulk' THEN COALESCE(p.units_per_bulk, 1) ELSE 1 END *
+               si.cost_price
+             ), 0)
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id
+             WHERE si.sale_id = s.id
+           )
+      END
+    ), 0) AS totalCost
+    FROM sales s
     WHERE s.sale_date BETWEEN ? AND ? AND s.status = 'completed'
   `).get([s, e]) as { totalCost: number }
 
@@ -347,8 +398,16 @@ export function buildProfitLoss(db: DB, dateFrom: string, dateTo: string): Profi
   const cogs = db.prepare(`
     SELECT COALESCE(SUM(
       CASE WHEN sv.total_cost_amount > 0 THEN sv.total_cost_amount
-           ELSE COALESCE((SELECT SUM(si.quantity * si.cost_price)
-                          FROM sale_items si WHERE si.sale_id = sv.id), 0)
+           ELSE COALESCE((
+             SELECT SUM(
+               si.quantity *
+               CASE WHEN si.sell_mode = 'bulk' THEN COALESCE(p.units_per_bulk, 1) ELSE 1 END *
+               si.cost_price
+             )
+             FROM sale_items si
+             LEFT JOIN products p ON si.product_id = p.id
+             WHERE si.sale_id = sv.id
+           ), 0)
       END
     ),0) AS cost
     FROM sales sv
