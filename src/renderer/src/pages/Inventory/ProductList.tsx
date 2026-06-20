@@ -57,9 +57,16 @@ export default function ProductList() {
     { key:'cost_price', label:'Cost', render:p=><span>{sym}{p.cost_price.toFixed(2)}</span>},
     { key:'selling_price', label:'Price', render:p=><span className="font-medium text-blue-600">{sym}{p.selling_price.toFixed(2)}</span>},
     { key:'stock_qty', label:'Stock', render:p=>(
-      <span className={`badge ${p.stock_qty<=0?'bg-red-100 text-red-700':p.stock_qty<=p.reorder_level?'bg-amber-100 text-amber-700':'bg-green-100 text-green-700'}`}>
-        {p.stock_qty} {p.unit}
-      </span>
+      <div>
+        <span className={`badge ${p.stock_qty<=0?'bg-red-100 text-red-700':p.stock_qty<=p.reorder_level?'bg-amber-100 text-amber-700':'bg-green-100 text-green-700'}`}>
+          {p.stock_qty} {p.unit}
+        </span>
+        {p.pricing_mode === 'both' && p.units_per_bulk > 1 && (
+          <div className="text-[10px] text-slate-500">
+            {Math.round(p.stock_qty / p.units_per_bulk * 10) / 10} of {Math.round(p.reorder_level / p.units_per_bulk * 10) / 10} {p.bulk_unit}
+          </div>
+        )}
+      </div>
     )},
   ]
 
