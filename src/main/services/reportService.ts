@@ -243,6 +243,87 @@ export function buildInventoryReport(db: DB): InventoryReportData {
 }
 
 // ─── P&L ─────────────────────────────────────────────────
+// ─── Advanced dashboard insights ─────────────────────────
+// Sales velocity, days-to-finish projection, top/slow movers, dead stock.
+// `windowDays` is the lookback period used to compute the average daily
+// sales rate (default 30 days) — the rate drives the days-to-finish estimate.
+export function buildInsights(db: DB, windowDays = 30) {
+  const since = `-${windowDays} days`
+
+  // Per-product sales velocity over the window (pieces sold per day).
+  // sale_items.quantity is in the sold unit; for bulk lines we multiply by
+  // units_per_bulk so velocity is always in base pieces, matching stock_qty.
+  const velocity = db.prepare(`
+    SELECT
+      p.id, p.name, p.stock_qty, p.reorder_level, p.unit,
+      p.selling_price, p.cost_price,
+      COALESCE(SUM(
+        CASE WHEN si.sell_mode = 'bulk'
+             THEN si.quantity * COALESCE(p.units_per_bulk, 1)
+             ELSE si.quantity END
+      ), 0) AS units_sold,
+      COALESCE(SUM(si.line_total), 0) AS revenue,
+      COUNT(DISTINCT s.id)            AS times_sold
+    FROM products p
+    LEFT JOIN sale_items si ON si.product_id = p.id
+    LEFT JOIN sales s ON si.sale_id = s.id
+         AND s.status = 'completed'
+         AND s.sale_date >= datetime('now', ?)
+    WHERE p.is_active = 1
+    GROUP BY p.id
+  `).all([since]) as Array<{
+    id: number; name: string; stock_qty: number; reorder_level: number; unit: string
+    selling_price: number; cost_price: number
+    units_sold: number; revenue: number; times_sold: number
+  }>
+
+  const enriched = velocity.map(p => {
+    const perDay = p.units_sold / windowDays         // avg pieces sold per day
+    const daysLeft = perDay > 0 ? p.stock_qty / perDay : null  // null = no sales = won't run out
+    return {
+      id: p.id, name: p.name, unit: p.unit,
+      stock_qty: p.stock_qty, reorder_level: p.reorder_level,
+      units_sold: p.units_sold, revenue: p.revenue, times_sold: p.times_sold,
+      per_day: +perDay.toFixed(2),
+      days_left: daysLeft != null ? Math.round(daysLeft) : null,
+      profit: +((p.selling_price - p.cost_price) * p.units_sold).toFixed(2),
+    }
+  })
+
+  const sold = enriched.filter(p => p.units_sold > 0)
+
+  // Most purchased (by quantity sold)
+  const mostSold = [...sold].sort((a, b) => b.units_sold - a.units_sold).slice(0, 8)
+  // Least purchased (sold at least once, but slowest)
+  const leastSold = [...sold].sort((a, b) => a.units_sold - b.units_sold).slice(0, 8)
+  // Running out soon — has a finite days_left, soonest first
+  const runningOut = enriched
+    .filter(p => p.days_left != null && p.stock_qty > 0)
+    .sort((a, b) => (a.days_left as number) - (b.days_left as number))
+    .slice(0, 10)
+  // Dead stock — in stock but ZERO sales in the window
+  const deadStock = enriched
+    .filter(p => p.units_sold === 0 && p.stock_qty > 0)
+    .sort((a, b) => b.stock_qty - a.stock_qty)
+    .slice(0, 10)
+  // Most profitable products in the window
+  const topProfit = [...sold].sort((a, b) => b.profit - a.profit).slice(0, 8)
+
+  // Headline counts
+  const outOfStock = enriched.filter(p => p.stock_qty <= 0).length
+  const lowStock   = enriched.filter(p => p.stock_qty > 0 && p.stock_qty <= p.reorder_level).length
+
+  return {
+    windowDays,
+    mostSold, leastSold, runningOut, deadStock, topProfit,
+    counts: {
+      activeProducts: enriched.length,
+      outOfStock, lowStock,
+      noSales: enriched.filter(p => p.units_sold === 0).length,
+    },
+  }
+}
+
 export function buildProfitLoss(db: DB, dateFrom: string, dateTo: string): ProfitLossData {
   const s = `${dateFrom} 00:00:00`, e = `${dateTo} 23:59:59`
 
