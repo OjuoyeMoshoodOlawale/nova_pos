@@ -93,6 +93,7 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
   const [showAdvanced,     setShowAdvanced]     = useState(false)
   const [showAdvisor,      setShowAdvisor]      = useState(false)
   const [stockMode,        setStockMode]        = useState<'units' | 'bulks'>('units')
+  const [reorderInPacks,   setReorderInPacks]   = useState(false)  // enter reorder level in packs vs pieces
   const [bulkStockQty,     setBulkStockQty]     = useState(
     // Pre-fill bulk qty if editing and has bulk pricing
     p?.has_bulk_pricing && p?.units_per_bulk > 0 && p?.stock_qty > 0
@@ -705,12 +706,40 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
             </div>
 
             <div>
-              <label className="label">Reorder Level</label>
-              <input
-                type="number" step="1" min="0" className="input"
-                value={d.reorder_level || ''}
-                onChange={e => set('reorder_level', parseFloat(e.target.value) || 0)}
-              />
+              <label className="label">Reorder Level (low-stock alert)</label>
+              <div className="flex gap-2">
+                <input
+                  type="number" step="1" min="0" className="input flex-1"
+                  value={reorderInPacks
+                    ? (d.units_per_bulk > 0 ? +(d.reorder_level / d.units_per_bulk).toFixed(2) : d.reorder_level)
+                    : (d.reorder_level || '')}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value) || 0
+                    // Store reorder_level in PIECES always. If entered in packs,
+                    // convert using units_per_bulk so alerts stay consistent.
+                    set('reorder_level', reorderInPacks ? v * (d.units_per_bulk || 1) : v)
+                  }}
+                />
+                {/* Only offer the pack option when the product actually has a bulk unit */}
+                {(d.pricing_mode === 'both' || d.pricing_mode === 'bulk') && d.units_per_bulk > 1 && (
+                  <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
+                    <button type="button" onClick={() => setReorderInPacks(false)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium ${!reorderInPacks ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+                      {d.unit}
+                    </button>
+                    <button type="button" onClick={() => setReorderInPacks(true)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium ${reorderInPacks ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>
+                      {d.bulk_unit}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {(d.pricing_mode === 'both' || d.pricing_mode === 'bulk') && d.units_per_bulk > 1 && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Alerts when stock falls to {d.reorder_level} {d.unit}
+                  {' '}({d.units_per_bulk > 0 ? +(d.reorder_level / d.units_per_bulk).toFixed(1) : 0} {d.bulk_unit})
+                </p>
+              )}
             </div>
 
             <div>
