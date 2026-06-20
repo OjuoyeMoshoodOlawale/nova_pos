@@ -12,3 +12,25 @@
 }
 
 .step-label { @apply text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block; }
+
+/* Excel-style always-visible scrollbar for the POS cart */
+.cart-scroll::-webkit-scrollbar {
+  width: 12px;
+}
+.cart-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 6px;
+}
+.cart-scroll::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 6px;
+  border: 2px solid #f1f5f9;
+}
+.cart-scroll::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+/* Firefox */
+.cart-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
