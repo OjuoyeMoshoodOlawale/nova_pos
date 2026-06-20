@@ -42,7 +42,12 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
       const prod = db.prepare('SELECT cost_price FROM products WHERE id = ?')
         .get([item.product_id]) as { cost_price: number } | undefined
       const costPrice = prod?.cost_price ?? 0
-      totalCostAmount += costPrice * item.quantity
+      // Cost of goods for this line, in pieces. Bulk lines sell cartons, so
+      // the piece count = quantity × units_per_bulk.
+      const isBulk  = ((item as any).sell_mode ?? 'unit') === 'bulk'
+      const perBulk = (item as any)._upb ?? (item as any).units_per_bulk ?? 1
+      const pieces  = isBulk ? item.quantity * perBulk : item.quantity
+      totalCostAmount += costPrice * pieces
       return {
         product_id:   item.product_id,
         product_name: item.product_name,
@@ -78,15 +83,30 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
       const prod = db.prepare('SELECT stock_qty, cost_price FROM products WHERE id = ?')
         .get([item.product_id]) as { stock_qty: number; cost_price: number } | undefined
       const qtyBefore = prod?.stock_qty ?? 0
-      const qtyAfter  = qtyBefore - item.quantity
+
+      // CRITICAL: stock_qty is always in base PIECES. A bulk line's quantity
+      // is in cartons, so convert to pieces before deducting. Selling 1
+      // carton of 40 must remove 40 pieces, not 1.
+      const isBulk    = ((item as any).sell_mode ?? 'unit') === 'bulk'
+      const perBulk   = (item as any)._upb ?? (item as any).units_per_bulk ?? 1
+      const piecesOut = isBulk ? item.quantity * perBulk : item.quantity
+
+      // Guard against overselling — never let stock go negative. This catches
+      // race conditions (two terminals selling the last unit) and stale carts.
+      if (piecesOut > qtyBefore) {
+        throw new Error(
+          `Not enough stock for "${item.product_name}": ${qtyBefore} available, ${piecesOut} requested`
+        )
+      }
+      const qtyAfter = qtyBefore - piecesOut
 
       db.prepare(`
-        INSERT INTO sale_items (sale_id, product_id, product_name, unit_price, quantity, discount_pct, line_total, cost_price)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sale_items (sale_id, product_id, product_name, unit_price, quantity, discount_pct, line_total, cost_price, sell_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run([
         id, item.product_id, item.product_name,
         item.unit_price, item.quantity, item.discount_pct, item.line_total,
-        prod?.cost_price ?? 0,
+        prod?.cost_price ?? 0, (item as any).sell_mode ?? 'unit',
       ])
 
       db.prepare(`UPDATE products SET stock_qty = ?, updated_at = datetime('now') WHERE id = ?`)
@@ -95,7 +115,7 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
       db.prepare(`
         INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason)
         VALUES (?, ?, ?, ?, ?, 'sale')
-      `).run([item.product_id, input.served_by, qtyBefore, -item.quantity, qtyAfter])
+      `).run([item.product_id, input.served_by, qtyBefore, -piecesOut, qtyAfter])
     }
 
     for (const pmt of input.payments) {
@@ -194,16 +214,21 @@ export function voidSale(db: DB, saleId: number, reason: string, userId: number)
 
     const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as SaleItem[]
     for (const item of items) {
-      const prod = db.prepare('SELECT stock_qty FROM products WHERE id = ?').get([item.product_id]) as
-        { stock_qty: number } | undefined
+      const prod = db.prepare('SELECT stock_qty, units_per_bulk FROM products WHERE id = ?').get([item.product_id]) as
+        { stock_qty: number; units_per_bulk: number } | undefined
       const qtyBefore = prod?.stock_qty ?? 0
-      const qtyAfter  = qtyBefore + item.quantity
+      // Restock in PIECES. A bulk line's quantity is in cartons, so convert
+      // back using the product's units_per_bulk (mirrors the sale deduction).
+      const isBulk    = (item as any).sell_mode === 'bulk'
+      const perBulk   = prod?.units_per_bulk ?? 1
+      const piecesBack = isBulk ? item.quantity * perBulk : item.quantity
+      const qtyAfter  = qtyBefore + piecesBack
 
       db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run([qtyAfter, item.product_id])
       db.prepare(`
         INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason, notes)
         VALUES (?, ?, ?, ?, ?, 'correction', ?)
-      `).run([item.product_id, userId, qtyBefore, item.quantity, qtyAfter, `Void of sale #${saleId}`])
+      `).run([item.product_id, userId, qtyBefore, piecesBack, qtyAfter, `Void of sale #${saleId}`])
     }
 
     db.prepare(`
