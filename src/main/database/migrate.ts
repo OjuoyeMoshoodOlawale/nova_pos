@@ -403,6 +403,12 @@ ALTER TABLE products ADD COLUMN pricing_mode TEXT NOT NULL DEFAULT 'unit';
 UPDATE products SET pricing_mode = 'both' WHERE has_bulk_pricing = 1;
 UPDATE products SET pricing_mode = 'unit' WHERE has_bulk_pricing = 0 OR has_bulk_pricing IS NULL;
 `,
+
+  '009_sale_items_sell_mode.sql': `
+-- Record HOW each line was sold (unit vs bulk) so reports and reprints
+-- know whether 'quantity' means pieces or cartons.
+ALTER TABLE sale_items ADD COLUMN sell_mode TEXT NOT NULL DEFAULT 'unit';
+`,
 }
 
 
