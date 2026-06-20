@@ -309,13 +309,19 @@ export function buildInsights(db: DB, windowDays = 30) {
     SELECT
       p.id, p.name, p.stock_qty, p.reorder_level, p.unit,
       p.selling_price, p.cost_price,
+      p.bulk_unit, COALESCE(p.units_per_bulk, 1) AS units_per_bulk,
       COALESCE(SUM(
         CASE WHEN si.sell_mode = 'bulk'
              THEN si.quantity * COALESCE(p.units_per_bulk, 1)
              ELSE si.quantity END
       ), 0) AS units_sold,
       COALESCE(SUM(si.line_total), 0) AS revenue,
-      COUNT(DISTINCT s.id)            AS times_sold
+      COUNT(DISTINCT s.id)            AS times_sold,
+      -- Total ever purchased/received (in pieces), from restock records.
+      COALESCE((
+        SELECT SUM(sa.qty_change) FROM stock_adjustments sa
+        WHERE sa.product_id = p.id AND sa.reason = 'restock'
+      ), 0) AS total_purchased
     FROM products p
     LEFT JOIN sale_items si ON si.product_id = p.id
     LEFT JOIN sales s ON si.sale_id = s.id
@@ -326,16 +332,29 @@ export function buildInsights(db: DB, windowDays = 30) {
   `).all([since]) as Array<{
     id: number; name: string; stock_qty: number; reorder_level: number; unit: string
     selling_price: number; cost_price: number
-    units_sold: number; revenue: number; times_sold: number
+    bulk_unit: string | null; units_per_bulk: number
+    units_sold: number; revenue: number; times_sold: number; total_purchased: number
   }>
 
   const enriched = velocity.map(p => {
     const perDay = p.units_sold / windowDays         // avg pieces sold per day
     const daysLeft = perDay > 0 ? p.stock_qty / perDay : null  // null = no sales = won't run out
+    const upb = p.units_per_bulk || 1
+    const hasBulk = !!p.bulk_unit && upb > 1
     return {
       id: p.id, name: p.name, unit: p.unit,
-      stock_qty: p.stock_qty, reorder_level: p.reorder_level,
-      units_sold: p.units_sold, revenue: p.revenue, times_sold: p.times_sold,
+      bulk_unit: p.bulk_unit, units_per_bulk: upb, has_bulk: hasBulk,
+      // REMAINING stock — in pieces, plus pack-equivalent for bulk products
+      stock_qty: p.stock_qty,
+      remaining_packs: hasBulk ? +(p.stock_qty / upb).toFixed(1) : null,
+      // PURCHASED (total ever received) — pieces + pack-equivalent
+      total_purchased: p.total_purchased,
+      purchased_packs: hasBulk ? +(p.total_purchased / upb).toFixed(1) : null,
+      // SOLD in the window — pieces + pack-equivalent
+      units_sold: p.units_sold,
+      sold_packs: hasBulk ? +(p.units_sold / upb).toFixed(1) : null,
+      reorder_level: p.reorder_level,
+      revenue: p.revenue, times_sold: p.times_sold,
       per_day: +perDay.toFixed(2),
       days_left: daysLeft != null ? Math.round(daysLeft) : null,
       profit: +((p.selling_price - p.cost_price) * p.units_sold).toFixed(2),
@@ -374,6 +393,8 @@ export function buildInsights(db: DB, windowDays = 30) {
   return {
     windowDays,
     mostSold, leastSold, runningOut, deadStock, topProfit,
+    // Full per-product movement (purchased/sold/remaining) for the audit table.
+    movement: [...enriched].sort((a, b) => a.name.localeCompare(b.name)),
     counts: {
       activeProducts: enriched.length,
       outOfStock, lowStock,
