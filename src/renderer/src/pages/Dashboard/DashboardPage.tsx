@@ -9,8 +9,9 @@ import {
   ResponsiveContainer, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 import {
-  TrendingUp, ShoppingCart, AlertTriangle, RefreshCw, ArrowUpRight, Coins,
+  TrendingUp, ShoppingCart, AlertTriangle, RefreshCw, ArrowUpRight, Coins, BarChart3, LayoutDashboard,
 } from 'lucide-react'
+import InsightsPanel from './InsightsPanel'
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444']
 
@@ -46,6 +47,7 @@ export default function DashboardPage() {
   const { user } = useAuthStore()
   const sym = profile?.currency_symbol ?? '₦'
 
+  const [view, setView]         = useState<'overview' | 'insights'>('overview')
   const [period, setPeriod]     = useState<Period>('day')
   const [data, setData]         = useState<any>(null)   // headline numbers for the chosen period
   const [daily, setDaily]       = useState<any>(null)   // today's rich detail (hourly + payments)
@@ -142,6 +144,22 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      {/* Overview / Insights view switcher */}
+      <div className="flex gap-2 border-b border-slate-100">
+        <button onClick={() => setView('overview')}
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${view === 'overview' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+          <LayoutDashboard className="w-4 h-4" /> Overview
+        </button>
+        <button onClick={() => setView('insights')}
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${view === 'insights' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+          <BarChart3 className="w-4 h-4" /> Insights
+        </button>
+      </div>
+
+      {view === 'insights' ? (
+        <InsightsPanel />
+      ) : (
+      <>
       {/* Period toggle */}
       <div className="inline-flex bg-slate-100 rounded-xl p-1 gap-1">
         {PERIODS.map(p => (
@@ -277,6 +295,8 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }
