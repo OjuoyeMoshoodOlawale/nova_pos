@@ -17,4 +17,7 @@ export function registerReportHandlers(db: DB): void {
   // Yearly — FIX: was using require() which breaks in electron-vite bundle.
   // reportService is already imported at the top of this file; use it directly.
   safeHandle('report:yearly', (_e, year: number) => reportService.buildYearlyReport(db, year))
+
+  // Advanced dashboard insights (velocity, days-to-finish, movers, dead stock)
+  safeHandle('report:insights', (_e, windowDays?: number) => reportService.buildInsights(db, windowDays ?? 30))
 }
