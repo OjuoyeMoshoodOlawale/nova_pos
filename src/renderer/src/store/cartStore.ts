@@ -191,10 +191,11 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   setItemDiscount(productId, mode, pct) {
     const key = itemKey(productId, mode)
+    const safePct = Math.min(100, Math.max(0, pct || 0))   // clamp 0–100%
     set(s => ({
       items: s.items.map(i =>
         itemKey(i.product_id, i.sell_mode as SellMode) === key
-          ? { ...i, discount_pct: pct, line_total: lineTotal(i.unit_price, i.quantity, pct) }
+          ? { ...i, discount_pct: safePct, line_total: lineTotal(i.unit_price, i.quantity, safePct) }
           : i
       )
     }))
