@@ -135,6 +135,7 @@ const api = {
     daily:      (date: string)                => invoke(CH.REPORT_DAILY, date),
     monthly:    (year: number, month: number) => invoke(CH.REPORT_MONTHLY, year, month),
     yearly:     (year: number)                => invoke('report:yearly', year),
+    insights:   (windowDays?: number)         => invoke('report:insights', windowDays),
     inventory:  ()                            => invoke(CH.REPORT_INVENTORY),
     profitLoss: (from: string, to: string)    => invoke(CH.REPORT_PROFIT_LOSS, from, to),
     xReport:    (uid: number)                 => invoke(CH.REPORT_XREPORT, uid),
