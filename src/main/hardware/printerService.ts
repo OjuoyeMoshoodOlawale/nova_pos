@@ -87,7 +87,7 @@ export function buildReceiptContent(sale: SaleDetail, profile: BusinessProfile):
   if (sale.change_given > 0) data.push(t(`Change: ${sym}${sale.change_given.toFixed(2)}`, true, 'left', '13px'))
 
   try {
-    data.push({ type: 'barcode', value: sale.receipt_no, height: 40, width: 1.5, displayValue: true, fontsize: 9, style: { textAlign: 'center', marginTop: '8px' } })
+    data.push({ type: 'barcode', value: sale.receipt_no, height: 30, width: 1.5, displayValue: true, fontsize: 9, style: { textAlign: 'center', marginTop: '8px' } })
   } catch { /* not all printers support barcode */ }
 
   data.push(divider('═'))
@@ -149,7 +149,7 @@ export async function printSaleById(saleId: number): Promise<void> {
     margin:         '0 0 0 0',     // start at the very top, no side gaps
     copies:         1,
     silent:         true,
-    timeOutPerLine: 700,
+    timeOutPerLine: 600,
     pageSize:       (paperWidth === '58mm' ? '58mm' : '80mm') as any,
   })
 
