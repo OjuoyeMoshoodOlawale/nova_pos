@@ -23,18 +23,38 @@ export default function InsightsPanel() {
   const [loading, setLoading] = useState(true)
   const [stockQuery, setStockQuery] = useState('')
 
+  const [error, setError] = useState<string | null>(null)
+
   const load = useCallback(async (w: number) => {
     setLoading(true)
-    const [ins, prods] = await Promise.all([
-      window.api.reports.insights(w),
-      window.api.products.getAll(),
-    ])
-    if (ins.success)   setData(ins.data)
-    if (prods.success) setProducts(prods.data)
-    setLoading(false)
+    setError(null)
+    try {
+      const [ins, prods] = await Promise.all([
+        window.api.reports.insights(w),
+        window.api.products.getAll(),
+      ])
+      if (ins.success)   setData(ins.data)
+      else               setError(ins.error || 'Could not load insights')
+      if (prods.success) setProducts(prods.data)
+    } catch (e: any) {
+      // Never leave the spinner hanging — surface the error instead.
+      setError(e?.message || 'Failed to load insights')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { load(windowDays) }, [windowDays, load])
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+        <p className="text-sm text-red-600 font-medium">Couldn't load insights</p>
+        <p className="text-xs text-slate-400 max-w-sm">{error}</p>
+        <button onClick={() => load(windowDays)} className="btn-secondary text-sm">Try again</button>
+      </div>
+    )
+  }
 
   if (loading) {
     return (
