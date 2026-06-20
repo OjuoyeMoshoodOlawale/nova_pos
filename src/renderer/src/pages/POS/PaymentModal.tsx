@@ -56,14 +56,41 @@ export default function PaymentModal({totals, onClose, onSuccess}: Props) {
     setProcessing(false)
     if (r.success && r.data) {
       setDone({saleId:r.data.saleId, receiptNo:r.data.receiptNo, change:r.data.change})
+      autoPrint(r.data.saleId)   // print immediately, no button needed
     } else {
       addToast('error', r.error||'Sale failed')
     }
   }
 
+  const [printState, setPrintState] = useState<'idle' | 'printing' | 'ok' | 'failed'>('idle')
+
+  // Auto-print the receipt as soon as the sale completes — no button needed.
+  // Respects the auto_print_receipt setting; records status so the manual
+  // reprint button can act as a fallback if it failed.
+  async function autoPrint(saleId: number) {
+    try {
+      const s = await window.api.settings.getAll()
+      const autoOn = !s.success || s.data?.auto_print_receipt !== 'false'
+      if (!autoOn) { setPrintState('idle'); return }
+      setPrintState('printing')
+      const pr = await window.api.hardware.print({ saleId })
+      setPrintState(pr?.success ? 'ok' : 'failed')
+    } catch {
+      setPrintState('failed')
+    }
+  }
+
   async function handlePrint() {
     if (!done) return
-    await window.api.hardware.print({saleId: done.saleId})
+    setPrintState('printing')
+    try {
+      const pr = await window.api.hardware.print({ saleId: done.saleId })
+      setPrintState(pr?.success ? 'ok' : 'failed')
+      if (!pr?.success) addToast('error', pr?.error || 'Print failed — check printer')
+    } catch (e: any) {
+      setPrintState('failed')
+      addToast('error', e?.message || 'Print failed — check printer')
+    }
   }
 
   if (done) return (
@@ -75,8 +102,28 @@ export default function PaymentModal({totals, onClose, onSuccess}: Props) {
         <h2 className="text-xl font-bold text-slate-800">Sale Complete!</h2>
         <p className="text-slate-500 mt-1">Receipt: <span className="font-mono font-bold">{done.receiptNo}</span></p>
         {done.change > 0 && <div className="mt-4 bg-green-50 rounded-xl p-4"><p className="text-sm text-green-700">Change due</p><p className="text-3xl font-bold text-green-600">{sym}{done.change.toFixed(2)}</p></div>}
+        {/* Auto-print status + reprint fallback */}
         <div className="mt-6 space-y-2">
-          <button onClick={handlePrint} className="w-full btn-secondary flex items-center justify-center gap-2"><Printer className="w-4 h-4"/> Print Receipt</button>
+          {printState === 'printing' && (
+            <p className="text-xs text-slate-400 flex items-center justify-center gap-2">
+              <span className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              Printing receipt…
+            </p>
+          )}
+          {printState === 'ok' && (
+            <p className="text-xs text-green-600">✓ Receipt printed</p>
+          )}
+          {printState === 'failed' && (
+            <p className="text-xs text-red-500">Printing failed — tap below to try again</p>
+          )}
+          {/* Reprint button: prominent if auto-print failed, subtle otherwise */}
+          <button
+            onClick={handlePrint}
+            disabled={printState === 'printing'}
+            className={`w-full flex items-center justify-center gap-2 ${printState === 'failed' ? 'btn-primary' : 'btn-secondary'}`}
+          >
+            <Printer className="w-4 h-4"/> {printState === 'failed' ? 'Retry Print' : 'Reprint Receipt'}
+          </button>
           <button onClick={()=>onSuccess(done.saleId, done.receiptNo)} className="w-full btn-primary">New Sale</button>
         </div>
       </div>
