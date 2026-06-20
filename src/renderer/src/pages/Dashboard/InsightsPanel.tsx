@@ -118,7 +118,9 @@ export default function InsightsPanel() {
                   <p className={`text-sm font-bold ${urgencyColor(p.days_left)}`}>
                     {p.days_left === 0 ? 'Today' : `~${p.days_left} days`}
                   </p>
-                  <p className="text-[10px] text-slate-400">to finish</p>
+                  {p.suggested_order > 0 && (
+                    <p className="text-[10px] text-blue-500 font-medium">order ~{p.suggested_order} {p.unit}</p>
+                  )}
                 </div>
               </div>
             ))}
