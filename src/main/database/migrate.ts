@@ -436,88 +436,88 @@ AFTER INSERT ON categories
 BEGIN UPDATE categories SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_categories_update_unsync
-AFTER UPDATE ON categories WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE categories SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON categories WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE categories SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_suppliers_insert_unsync
 AFTER INSERT ON suppliers
 BEGIN UPDATE suppliers SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_suppliers_update_unsync
-AFTER UPDATE ON suppliers WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE suppliers SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON suppliers WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE suppliers SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_products_insert_unsync
 AFTER INSERT ON products
 BEGIN UPDATE products SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_products_update_unsync
-AFTER UPDATE ON products WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE products SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON products WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE products SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_customers_insert_unsync
 AFTER INSERT ON customers
 BEGIN UPDATE customers SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_customers_update_unsync
-AFTER UPDATE ON customers WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE customers SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON customers WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE customers SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_sales_insert_unsync
 AFTER INSERT ON sales
 BEGIN UPDATE sales SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_sales_update_unsync
-AFTER UPDATE ON sales WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE sales SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON sales WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE sales SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_sale_items_insert_unsync
 AFTER INSERT ON sale_items
 BEGIN UPDATE sale_items SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_sale_items_update_unsync
-AFTER UPDATE ON sale_items WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE sale_items SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON sale_items WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE sale_items SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payments_insert_unsync
 AFTER INSERT ON payments
 BEGIN UPDATE payments SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_payments_update_unsync
-AFTER UPDATE ON payments WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE payments SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON payments WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE payments SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stock_adjustments_insert_unsync
 AFTER INSERT ON stock_adjustments
 BEGIN UPDATE stock_adjustments SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stock_adjustments_update_unsync
-AFTER UPDATE ON stock_adjustments WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE stock_adjustments SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON stock_adjustments WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE stock_adjustments SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_purchase_orders_insert_unsync
 AFTER INSERT ON purchase_orders
 BEGIN UPDATE purchase_orders SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_purchase_orders_update_unsync
-AFTER UPDATE ON purchase_orders WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE purchase_orders SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON purchase_orders WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE purchase_orders SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_purchase_order_items_insert_unsync
 AFTER INSERT ON purchase_order_items
 BEGIN UPDATE purchase_order_items SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_purchase_order_items_update_unsync
-AFTER UPDATE ON purchase_order_items WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE purchase_order_items SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON purchase_order_items WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE purchase_order_items SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_activity_log_insert_unsync
 AFTER INSERT ON activity_log
 BEGIN UPDATE activity_log SET is_sync = 0 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS trg_activity_log_update_unsync
-AFTER UPDATE ON activity_log WHEN OLD.is_sync != 0 OR NEW.is_sync != 0
-BEGIN UPDATE activity_log SET is_sync = 0 WHERE id = NEW.id AND NEW.is_sync != 0; END;
+AFTER UPDATE ON activity_log WHEN NEW.is_sync = OLD.is_sync
+BEGIN UPDATE activity_log SET is_sync = 0 WHERE id = NEW.id; END;
 `,
 
   '012_supabase_config.sql': `
