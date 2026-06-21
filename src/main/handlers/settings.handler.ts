@@ -29,6 +29,7 @@ import * as settingsService        from '../services/settingsService'
 import { testEmail, performBackup } from '../mailer/mailerService'
 import { CH }                      from '@shared/ipcChannels'
 import logger                      from '../utils/logger'
+import * as syncService            from '../services/syncService'
 
 // ─── Safe path resolution ─────────────────────────────────
 // NEVER call app.getPath twice — if the first call returns undefined
@@ -484,7 +485,6 @@ export function registerSettingsHandlers(db: DB): void {
   })
 
   // ── Supabase sync ─────────────────────────────────────
-  const syncService = require('../services/syncService')
 
   safeHandle('sync:getConfig', () => {
     try {
