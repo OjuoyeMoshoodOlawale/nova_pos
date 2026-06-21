@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAppStore }  from '../../store/appStore'
 import { useAuthStore } from '../../store/authStore'
-import { Building2, Receipt, Mail, Printer, Network, HardDrive, UserCog, Tag, Percent, TestTube, Plus, Edit2, Trash2, X } from 'lucide-react'
+import { Building2, Receipt, Mail, Printer, Network, HardDrive, UserCog, Tag, Percent, TestTube, Plus, Edit2, Trash2, X, Cloud } from 'lucide-react'
+import SyncSettings from './SyncSettings'
 
 const ALL_TABS = [
   {id:'business',  l:'Business',   icon:Building2},
@@ -12,6 +13,7 @@ const ALL_TABS = [
   {id:'printer',   l:'Printer',    icon:Printer},
   {id:'network',   l:'Network',    icon:Network},
   {id:'backup',    l:'Backup',     icon:HardDrive},
+  {id:'cloud',     l:'Cloud Sync', icon:Cloud},
   {id:'dev',       l:'Developer',  icon:UserCog},
 ] as const
 type Tab = typeof ALL_TABS[number]['id']
@@ -628,6 +630,14 @@ export default function SettingsPage() {
                   To restore on a new machine, activate with the same licence key first.
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* ── CLOUD SYNC ── */}
+          {tab==='cloud' && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold text-slate-800">Cloud Sync</h2>
+              <SyncSettings />
             </div>
           )}
 
