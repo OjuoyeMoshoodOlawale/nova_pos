@@ -40,8 +40,13 @@ export default function App() {
   useEffect(() => {
     async function boot() {
       try {
-        // 1. Check activation
-        const actResult = await window.api.activation.getStatus()
+        // ── Parallel batch 1: activation + settings (independent reads) ──
+        const [actResult, settings] = await Promise.all([
+          window.api.activation.getStatus(),
+          window.api.settings.getAll(),
+        ])
+
+        // Gate: not activated → show activation screen
         if (!actResult.success || !actResult.data?.activated) {
           setActivated(false)
           setBooting(false)
@@ -49,8 +54,7 @@ export default function App() {
         }
         setActivated(true)
 
-        // 2. Check setup
-        const settings = await window.api.settings.getAll()
+        // Gate: setup not complete → show setup wizard
         if (!settings.success || settings.data?.setup_complete !== 'true') {
           setSetupComplete(false)
           setBooting(false)
@@ -58,19 +62,19 @@ export default function App() {
         }
         setSetupComplete(true)
 
-        // 3. Load business profile
-        const prof = await window.api.profile.get()
+        // ── Parallel batch 2: profile + session restore ──────────────
+        const savedToken = sessionStorage.getItem('nova_token')
+        const [prof, me] = await Promise.all([
+          window.api.profile.get(),
+          savedToken ? window.api.auth.me(savedToken) : Promise.resolve(null),
+        ])
+
         if (prof.success && prof.data) setProfile(prof.data)
 
-        // 4. Restore session if token exists
-        const savedToken = sessionStorage.getItem('nova_token')
-        if (savedToken) {
-          const me = await window.api.auth.me(savedToken)
-          if (me.success && me.data) {
-            setSession(me.data, savedToken)
-          } else {
-            clearSession()
-          }
+        if (me?.success && me.data) {
+          setSession(me.data, savedToken!)
+        } else if (savedToken) {
+          clearSession()
         }
       } catch (err) {
         console.error('[Boot] Error:', err)
