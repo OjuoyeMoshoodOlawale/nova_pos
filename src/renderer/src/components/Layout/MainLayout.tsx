@@ -5,13 +5,14 @@ import { useAppStore }   from '../../store/appStore'
 import {
   LayoutDashboard, ShoppingCart, Package, BarChart3,
   Users, Truck, UserCog, Settings, LogOut,
-  ShieldAlert, Wifi,
+  ShieldAlert, Wifi, ClipboardCheck,
 } from 'lucide-react'
 
 const NAV = [
   { to: '/',          icon: LayoutDashboard, label: 'Dashboard',  roles: ['admin','manager','cashier'] },
   { to: '/pos',       icon: ShoppingCart,   label: 'POS Register',roles: ['admin','manager','cashier'] },
   { to: '/inventory', icon: Package,        label: 'Inventory',   roles: ['admin','manager'] },
+  { to: '/stock-audit', icon: ClipboardCheck, label: 'Stock Audit', roles: ['admin','manager'] },
   { to: '/sales',     icon: BarChart3,      label: 'Sales',       roles: ['admin','manager','cashier'] },
   { to: '/reports',   icon: BarChart3,      label: 'Reports',     roles: ['admin','manager'] },
   { to: '/customers', icon: Users,          label: 'Customers',   roles: ['admin','manager','cashier'] },
