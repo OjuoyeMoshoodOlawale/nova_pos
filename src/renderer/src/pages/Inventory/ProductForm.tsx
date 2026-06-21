@@ -61,6 +61,24 @@ export default function ProductForm({ product, categories, onClose, onSaved }: P
   // ── Form state ──────────────────────────────────────────
   const p = product as any  // bulk fields added in migration 002, not yet in TS type
 
+  // For NEW products, use the store's default_pricing_mode setting (Settings → Business).
+  // This lets bulk-only stores avoid selecting "Bulk only" on every product.
+  useEffect(() => {
+    if (!product) {
+      window.api.settings.getAll().then((r: any) => {
+        const mode = r?.data?.default_pricing_mode
+        if (mode === 'both' || mode === 'bulk') {
+          setD(prev => ({
+            ...prev,
+            pricing_mode: mode as 'unit'|'both'|'bulk',
+            has_bulk_pricing: mode !== 'unit',
+            units_per_bulk: mode === 'bulk' ? 1 : prev.units_per_bulk,
+          }))
+        }
+      })
+    }
+  }, [])
+
   const [d, setD] = useState({
     name:               p?.name              || '',
     sku:                p?.sku               || '',
