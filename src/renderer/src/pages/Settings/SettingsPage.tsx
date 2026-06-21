@@ -181,6 +181,23 @@ export default function SettingsPage() {
                   <div><label className="label">Currency Symbol</label><input className="input" value={P('currency_symbol')} onChange={e=>setLocalProfile((p:any)=>({...p,currency_symbol:e.target.value})) } placeholder="₦"/></div>
                   <div><label className="label">Currency Code</label><input className="input" value={P('currency_code')} onChange={e=>setLocalProfile((p:any)=>({...p,currency_code:e.target.value}))} placeholder="NGN"/></div>
                 </div>
+                <div>
+                  <label className="label">Default Pricing Mode (for new products)</label>
+                  <select className="input max-w-[280px]"
+                    value={S('default_pricing_mode') || 'unit'}
+                    onChange={async e => {
+                      await window.api.settings.set('default_pricing_mode', e.target.value)
+                      setSettings((s:any) => ({ ...s, default_pricing_mode: e.target.value }))
+                      addToast('success', `Default pricing mode set to: ${e.target.value}`)
+                    }}>
+                    <option value="unit">Pieces only — sell by single items</option>
+                    <option value="both">Both ways — pieces and bulk (carton/pack)</option>
+                    <option value="bulk">Bulk only — sell only by carton/bag/crate</option>
+                  </select>
+                  <p className="text-xs text-slate-400 mt-1">
+                    New products will default to this mode. You can still change it per product.
+                  </p>
+                </div>
                 <button onClick={saveProfile} disabled={saving} className="btn-primary">{saving?'Saving...':'Save Profile'}</button>
               </div>
             </div>
