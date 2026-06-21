@@ -146,6 +146,9 @@ function renderSetup() {
     if (!url || !key) return alert('Please enter both URL and key')
     saveConfig({ url, key, name })
     initSupabase({ url, key })
+    // Ask for notification permission
+    const granted = await requestNotificationPermission()
+    if (granted) startStockCheckInterval()
     await renderDashboard()
   }
 }
@@ -165,6 +168,12 @@ async function renderDashboard() {
         <button id="btn-sync" class="bg-blue-600 rounded-lg px-3 py-1.5 text-xs flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
           Sync
+        </button>
+        <button id="btn-bell" class="bg-blue-600 rounded-lg p-1.5 relative" title="Notifications">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+          ${('Notification' in window && Notification.permission === 'granted')
+            ? '<span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full border border-blue-700"></span>'
+            : '<span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-400 rounded-full border border-blue-700"></span>'}
         </button>
       </div>
       <p id="sync-status" class="text-blue-200 text-[10px] mt-1">Loading...</p>
@@ -207,6 +216,23 @@ async function renderDashboard() {
       renderTabContent()
     } catch (e) {
       el.textContent = 'Sync failed: ' + e.message
+    }
+  }
+
+  // Notification bell — request permission if not granted
+  document.getElementById('btn-bell').onclick = async () => {
+    if (!('Notification' in window)) return alert('Notifications not supported on this browser')
+    if (Notification.permission === 'granted') {
+      alert('Notifications are ON. You will be alerted when stock is low or out.')
+      return
+    }
+    const granted = await requestNotificationPermission()
+    if (granted) {
+      startStockCheckInterval()
+      alert('Notifications enabled! You will receive alerts when stock is low.')
+      renderDashboard() // re-render to update bell indicator
+    } else {
+      alert('Notification permission denied. Enable it in your browser settings.')
     }
   }
 
@@ -395,13 +421,52 @@ async function renderAlerts(el) {
       </div>` : ''}`
 }
 
+// ─── Service Worker + Notifications ─────────────────────
+let swRegistration = null
+
+async function registerSW() {
+  if (!('serviceWorker' in navigator)) return
+  try {
+    swRegistration = await navigator.serviceWorker.register('/sw.js')
+    console.log('[App] Service Worker registered')
+  } catch (e) { console.warn('[App] SW registration failed:', e) }
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false
+  if (Notification.permission === 'granted') return true
+  if (Notification.permission === 'denied') return false
+  const result = await Notification.requestPermission()
+  return result === 'granted'
+}
+
+function startStockCheckInterval() {
+  const cfg = getConfig()
+  if (!cfg?.url || !cfg?.key) return
+  // Check every 10 minutes for low stock
+  const check = () => {
+    if (swRegistration?.active) {
+      swRegistration.active.postMessage({
+        type: 'CHECK_STOCK', url: cfg.url, key: cfg.key
+      })
+    }
+  }
+  check() // immediate
+  setInterval(check, 10 * 60 * 1000) // every 10 min
+}
+
 // ─── Boot ───────────────────────────────────────────────
 async function boot() {
   await openIDB()
+  await registerSW()
+
   const cfg = getConfig()
   if (cfg?.url && cfg?.key) {
     initSupabase(cfg)
     await renderDashboard()
+    // Request notification permission and start stock checks
+    const granted = await requestNotificationPermission()
+    if (granted) startStockCheckInterval()
   } else {
     renderSetup()
   }
