@@ -56,18 +56,27 @@ export default function ProductList() {
     { key:'category_name', label:'Category', render:p=><span className="text-xs text-slate-500">{p.category_name||'—'}</span>},
     { key:'cost_price', label:'Cost', render:p=><span>{sym}{p.cost_price.toFixed(2)}</span>},
     { key:'selling_price', label:'Price', render:p=><span className="font-medium text-blue-600">{sym}{p.selling_price.toFixed(2)}</span>},
-    { key:'stock_qty', label:'Stock', render:p=>(
-      <div>
-        <span className={`badge ${p.stock_qty<=0?'bg-red-100 text-red-700':p.stock_qty<=p.reorder_level?'bg-amber-100 text-amber-700':'bg-green-100 text-green-700'}`}>
-          {p.stock_qty} {p.unit}
-        </span>
-        {p.pricing_mode === 'both' && p.units_per_bulk > 1 && (
-          <div className="text-[10px] text-slate-500">
-            {Math.round(p.stock_qty / p.units_per_bulk * 10) / 10} of {Math.round(p.reorder_level / p.units_per_bulk * 10) / 10} {p.bulk_unit}
-          </div>
-        )}
-      </div>
-    )},
+    { key:'stock_qty', label:'Stock', render:p=>{
+      // For bulk-only products, stock_qty IS in cartons (units_per_bulk=1)
+      // so show the bulk_unit name. For 'both', show pieces + pack equivalent.
+      const isBulkOnly = p.pricing_mode === 'bulk'
+      const isBoth = p.pricing_mode === 'both' && p.units_per_bulk > 1
+      const displayUnit = isBulkOnly ? (p.bulk_unit || p.unit) : p.unit
+      const out = p.stock_qty <= 0
+      const low = !out && p.stock_qty <= p.reorder_level
+      return (
+        <div>
+          <span className={`badge ${out?'bg-red-100 text-red-700':low?'bg-amber-100 text-amber-700':'bg-green-100 text-green-700'}`}>
+            {p.stock_qty} {displayUnit}
+          </span>
+          {isBoth && (
+            <div className="text-[10px] text-slate-500">
+              {Math.round(p.stock_qty / p.units_per_bulk * 10) / 10} {p.bulk_unit} · reorder at {Math.round(p.reorder_level / p.units_per_bulk * 10) / 10}
+            </div>
+          )}
+        </div>
+      )
+    }},
   ]
 
   return (
@@ -80,7 +89,7 @@ export default function ProductList() {
         </div>
       </div>
       <div className="grid grid-cols-4 gap-4">
-        {[{l:'Total',v:products.length,c:'text-slate-800'},{l:'Retail Value',v:`${sym}${products.reduce((s,p)=>s+p.selling_price*p.stock_qty,0).toLocaleString()}`,c:'text-blue-600'},{l:'Low Stock',v:lowCount,c:'text-amber-600'},{l:'Out of Stock',v:outCount,c:'text-red-600'}].map(s=>(
+        {[{l:'Total',v:products.length,c:'text-slate-800'},{l:'Retail Value',v:`${sym}${products.reduce((s,p)=>s+(p.pricing_mode==='bulk'?(p.bulk_selling_price||p.selling_price):p.selling_price)*p.stock_qty,0).toLocaleString()}`,c:'text-blue-600'},{l:'Low Stock',v:lowCount,c:'text-amber-600'},{l:'Out of Stock',v:outCount,c:'text-red-600'}].map(s=>(
           <div key={s.l} className="card"><p className="text-xs text-slate-500">{s.l}</p><p className={`text-2xl font-bold mt-1 ${s.c}`}>{s.v}</p></div>
         ))}
       </div>
