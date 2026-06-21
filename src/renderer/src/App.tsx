@@ -1,21 +1,25 @@
 // src/renderer/src/App.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore }    from './store/authStore'
 import { useAppStore }     from './store/appStore'
-import ActivationPage      from './pages/Activation/ActivationPage'
-import SetupWizard         from './pages/Setup/SetupWizard'
-import LoginPage           from './pages/Login/LoginPage'
-import DashboardPage       from './pages/Dashboard/DashboardPage'
-import POSPage             from './pages/POS/POSPage'
-import ProductList         from './pages/Inventory/ProductList'
-import SalesHistory        from './pages/Sales/SalesHistory'
-import ReportsPage         from './pages/Reports/ReportsPage'
-import CustomersPage       from './pages/Customers/CustomersPage'
-import SuppliersPage       from './pages/Suppliers/SuppliersPage'
-import StaffPage           from './pages/Staff/StaffPage'
-import SettingsPage        from './pages/Settings/SettingsPage'
-import StockAuditPage     from './pages/Inventory/StockAuditPage'
+// ── Lazy-loaded pages ──────────────────────────────────
+// Only the page the user navigates to gets loaded. This cuts
+// initial bundle parse time dramatically — the browser doesn't
+// need to parse POSPage, Recharts, etc. until they're needed.
+const ActivationPage = lazy(() => import('./pages/Activation/ActivationPage'))
+const SetupWizard    = lazy(() => import('./pages/Setup/SetupWizard'))
+const LoginPage      = lazy(() => import('./pages/Login/LoginPage'))
+const DashboardPage  = lazy(() => import('./pages/Dashboard/DashboardPage'))
+const POSPage        = lazy(() => import('./pages/POS/POSPage'))
+const ProductList    = lazy(() => import('./pages/Inventory/ProductList'))
+const SalesHistory   = lazy(() => import('./pages/Sales/SalesHistory'))
+const ReportsPage    = lazy(() => import('./pages/Reports/ReportsPage'))
+const CustomersPage  = lazy(() => import('./pages/Customers/CustomersPage'))
+const SuppliersPage  = lazy(() => import('./pages/Suppliers/SuppliersPage'))
+const StaffPage      = lazy(() => import('./pages/Staff/StaffPage'))
+const SettingsPage   = lazy(() => import('./pages/Settings/SettingsPage'))
+const StockAuditPage = lazy(() => import('./pages/Inventory/StockAuditPage'))
 import MainLayout          from './components/Layout/MainLayout'
 import ToastContainer      from './components/ui/ToastContainer'
 import LoadingScreen       from './components/ui/LoadingScreen'
@@ -90,6 +94,11 @@ export default function App() {
   return (
     <HashRouter>
       <ToastContainer />
+      <Suspense fallback={
+        <div className="flex items-center justify-center h-screen bg-slate-50">
+          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      }>
       <Routes>
         {/* ── Activation ── */}
         <Route path="/activate" element={
@@ -131,6 +140,7 @@ export default function App() {
           <Navigate to={!activated ? '/activate' : !setupComplete ? '/setup' : '/'} replace />
         }/>
       </Routes>
+      </Suspense>
     </HashRouter>
   )
 }
