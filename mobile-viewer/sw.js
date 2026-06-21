@@ -4,8 +4,8 @@
 // with browser push notifications.
 // ═══════════════════════════════════════════════════════
 
-const CACHE_NAME = 'novapos-v1'
-const ASSETS = ['/', '/index.html', '/app.js', '/manifest.json']
+const CACHE_NAME = 'novapos-v2'
+const ASSETS = ['/', '/index.html', '/app.js', '/manifest.json', '/icon.svg']
 
 // ─── Install: cache app shell ───────────────────────────
 self.addEventListener('install', e => {
