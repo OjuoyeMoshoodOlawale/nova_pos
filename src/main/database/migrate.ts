@@ -410,26 +410,23 @@ UPDATE products SET pricing_mode = 'unit' WHERE has_bulk_pricing = 0 OR has_bulk
 ALTER TABLE sale_items ADD COLUMN sell_mode TEXT NOT NULL DEFAULT 'unit';
 `,
 
+
   '010_supabase_is_sync.sql': `
 -- Add is_sync boolean to core tables (0 = changed, 1 = synced).
 -- Existing rows default to 1 (treat as synced to avoid a full re-push).
-ALTER TABLE products  ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
-ALTER TABLE sales     ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE categories ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE suppliers ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE products ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE customers ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE sales ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE sale_items ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE payments ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE stock_adjustments ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE purchase_orders ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE purchase_order_items ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE activity_log ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
 `,
-}
-
-
-// ─── Migration runner ─────────────────────────────────────
-// Applies any migrations not yet recorded in the _migrations table,
-// in filename order, each inside its own transaction.
-export function runMigrations(db: DB): void {
-  // Ensure the tracking table exists first
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS _migrations (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      name        TEXT    NOT NULL UNIQUE,
-      applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  now'))
     )
   `)
 
