@@ -482,4 +482,61 @@ export function registerSettingsHandlers(db: DB): void {
       throw e
     }
   })
+
+  // ── Supabase sync ─────────────────────────────────────
+  const syncService = require('../services/syncService')
+
+  safeHandle('sync:getConfig', () => {
+    try {
+      return db.prepare('SELECT * FROM supabase_config WHERE id = 1').get() || {}
+    } catch { return {} }
+  })
+
+  safeHandle('sync:saveConfig', (_e, cfg: {
+    supabase_url: string; supabase_key: string;
+    sync_interval: number; is_enabled: number
+  }) => {
+    db.prepare(`
+      UPDATE supabase_config
+      SET supabase_url = ?, supabase_key = ?, sync_interval = ?, is_enabled = ?,
+          updated_at = datetime('now')
+      WHERE id = 1
+    `).run([cfg.supabase_url, cfg.supabase_key, cfg.sync_interval, cfg.is_enabled ? 1 : 0])
+    // Restart the sync interval with the new config
+    if (cfg.is_enabled) {
+      syncService.startSyncInterval(db)
+    } else {
+      syncService.stopSyncInterval()
+    }
+    return { success: true }
+  })
+
+  safeHandle('sync:runNow', async () => {
+    return syncService.runSync(db)
+  })
+
+  safeHandle('sync:status', () => {
+    try {
+      const cfg = db.prepare('SELECT last_sync_at, is_enabled FROM supabase_config WHERE id = 1').get() as any
+      // Count unsynced rows across all tables
+      const tables = ['products','sales','sale_items','payments','stock_adjustments','customers','categories','suppliers']
+      let pending = 0
+      for (const t of tables) {
+        try {
+          const r = db.prepare(`SELECT COUNT(*) AS c FROM ${t} WHERE is_sync = 0`).get() as any
+          pending += r?.c || 0
+        } catch { /* table may not have is_sync yet */ }
+      }
+      return { last_sync_at: cfg?.last_sync_at, is_enabled: cfg?.is_enabled, pending }
+    } catch { return { pending: 0, is_enabled: false } }
+  })
+
+  // Start sync on boot if enabled
+  try {
+    const cfg = db.prepare('SELECT is_enabled FROM supabase_config WHERE id = 1').get() as any
+    if (cfg?.is_enabled) {
+      syncService.startSyncInterval(db)
+      syncService.setupOnlineSync(db)
+    }
+  } catch { /* supabase_config may not exist yet */ }
 }
