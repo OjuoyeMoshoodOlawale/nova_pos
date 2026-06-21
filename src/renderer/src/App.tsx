@@ -15,6 +15,7 @@ import CustomersPage       from './pages/Customers/CustomersPage'
 import SuppliersPage       from './pages/Suppliers/SuppliersPage'
 import StaffPage           from './pages/Staff/StaffPage'
 import SettingsPage        from './pages/Settings/SettingsPage'
+import StockAuditPage     from './pages/Inventory/StockAuditPage'
 import MainLayout          from './components/Layout/MainLayout'
 import ToastContainer      from './components/ui/ToastContainer'
 import LoadingScreen       from './components/ui/LoadingScreen'
@@ -112,6 +113,7 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="pos"        element={<POSPage />} />
           <Route path="inventory"  element={<ProductList />} />
+          <Route path="stock-audit" element={<RequireAuth roles={['admin','manager']}><StockAuditPage /></RequireAuth>} />
           <Route path="sales"      element={<SalesHistory />} />
           <Route path="reports"    element={<RequireAuth roles={['admin','manager']}><ReportsPage /></RequireAuth>} />
           <Route path="customers"  element={<CustomersPage />} />
