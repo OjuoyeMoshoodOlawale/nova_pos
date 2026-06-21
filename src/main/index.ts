@@ -166,45 +166,51 @@ app.whenReady().then(async () => {
   // ── 0. Splash — instant visual feedback while we boot ───
   createSplash()
 
-  // ── 1. Database setup ───────────────────────────────────
+  // ── 1. Database setup (fast on subsequent runs) ─────────
   const db = getDb()
   runMigrations(db)
   logger.info('[Boot] Database ready')
 
-  // ── 2. Network adapter init ─────────────────────────────
-  const networkMode = getSetting(db, 'network_mode') as 'standalone' | 'server' | 'client'
-  if (networkMode === 'client') {
-    const ip     = getSetting(db, 'lan_server_ip')
-    const port   = getSetting(db, 'lan_server_port') || '3977'
-    const secret = getSetting(db, 'lan_secret')
-    initAdapter('client', { serverUrl: `http://${ip}:${port}`, secret })
-  } else {
-    initAdapter(networkMode || 'standalone')
-    if (networkMode === 'server') {
-      const port   = parseInt(getSetting(db, 'lan_server_port') || '3977')
-      const secret = getSetting(db, 'lan_secret') || ''
-      await startLanServer(port, secret).catch((e) =>
-        logger.error('[Boot] LAN server failed to start:', e.message)
-      )
-    }
-  }
-
-  // ── 3. IPC handlers ─────────────────────────────────────
+  // ── 2. IPC handlers (must be ready before renderer calls them)
   registerAllHandlers(db)
 
-  // ── 4. Schedulers (email reports + backup) ───────────────
-  const setupDone = getSetting(db, 'setup_complete') === 'true'
-  if (setupDone) {
-    startSchedulers()
-    logger.info('[Boot] Schedulers started')
-  }
-
-  // ── 5. Open main window ─────────────────────────────────
+  // ── 3. Open main window ASAP ────────────────────────────
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
   createWindow()
+
+  // ── 4. DEFERRED: start heavy services AFTER window shows ─
+  // These don't need to be ready before the UI — they run in the background.
+  mainWindow?.on('ready-to-show', () => {
+    // Network adapter + LAN server (fire and forget — don't block)
+    try {
+      const networkMode = getSetting(db, 'network_mode') as 'standalone' | 'server' | 'client'
+      if (networkMode === 'client') {
+        const ip     = getSetting(db, 'lan_server_ip')
+        const port   = getSetting(db, 'lan_server_port') || '3977'
+        const secret = getSetting(db, 'lan_secret')
+        initAdapter('client', { serverUrl: `http://${ip}:${port}`, secret })
+      } else {
+        initAdapter(networkMode || 'standalone')
+        if (networkMode === 'server') {
+          const port   = parseInt(getSetting(db, 'lan_server_port') || '3977')
+          const secret = getSetting(db, 'lan_secret') || ''
+          startLanServer(port, secret).catch(e =>
+            logger.error('[Boot] LAN server failed:', e.message)
+          )
+        }
+      }
+    } catch (e) { logger.error('[Boot] Network init error:', e) }
+
+    // Schedulers (email reports + backup)
+    const setupDone = getSetting(db, 'setup_complete') === 'true'
+    if (setupDone) {
+      startSchedulers()
+      logger.info('[Boot] Schedulers started (deferred)')
+    }
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
