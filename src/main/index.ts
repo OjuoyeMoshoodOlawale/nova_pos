@@ -7,9 +7,8 @@ import { runMigrations }      from './database/migrate'
 import { registerAllHandlers } from './handlers/index'
 import { getSetting }          from './services/settingsService'
 import { getActivationStatus } from './services/activationService'
-import { initAdapter }         from './network/networkAdapter'
-import { startLanServer }      from './network/lanServer'
-import { startSchedulers }     from './mailer/mailerService'
+// Network, LAN server, and mailer are lazy-loaded AFTER the window shows
+// to avoid blocking startup with heavy module parsing.
 import logger                  from './utils/logger'
 
 let mainWindow:   BrowserWindow | null = null
@@ -183,33 +182,41 @@ app.whenReady().then(async () => {
 
   // ── 4. DEFERRED: start heavy services AFTER window shows ─
   // These don't need to be ready before the UI — they run in the background.
+  // Dynamic import() so their module trees don't add to boot parse time.
   mainWindow?.on('ready-to-show', () => {
     // Network adapter + LAN server (fire and forget — don't block)
-    try {
-      const networkMode = getSetting(db, 'network_mode') as 'standalone' | 'server' | 'client'
-      if (networkMode === 'client') {
-        const ip     = getSetting(db, 'lan_server_ip')
-        const port   = getSetting(db, 'lan_server_port') || '3977'
-        const secret = getSetting(db, 'lan_secret')
-        initAdapter('client', { serverUrl: `http://${ip}:${port}`, secret })
-      } else {
-        initAdapter(networkMode || 'standalone')
-        if (networkMode === 'server') {
-          const port   = parseInt(getSetting(db, 'lan_server_port') || '3977')
-          const secret = getSetting(db, 'lan_secret') || ''
-          startLanServer(port, secret).catch(e =>
-            logger.error('[Boot] LAN server failed:', e.message)
-          )
+    (async () => {
+      try {
+        const networkMode = getSetting(db, 'network_mode') as 'standalone' | 'server' | 'client'
+        const { initAdapter } = await import('./network/networkAdapter')
+        if (networkMode === 'client') {
+          const ip     = getSetting(db, 'lan_server_ip')
+          const port   = getSetting(db, 'lan_server_port') || '3977'
+          const secret = getSetting(db, 'lan_secret')
+          initAdapter('client', { serverUrl: `http://${ip}:${port}`, secret })
+        } else {
+          initAdapter(networkMode || 'standalone')
+          if (networkMode === 'server') {
+            const port   = parseInt(getSetting(db, 'lan_server_port') || '3977')
+            const secret = getSetting(db, 'lan_secret') || ''
+            const { startLanServer } = await import('./network/lanServer')
+            startLanServer(port, secret).catch(e =>
+              logger.error('[Boot] LAN server failed:', e.message)
+            )
+          }
         }
-      }
-    } catch (e) { logger.error('[Boot] Network init error:', e) }
+      } catch (e) { logger.error('[Boot] Network init error:', e) }
 
-    // Schedulers (email reports + backup)
-    const setupDone = getSetting(db, 'setup_complete') === 'true'
-    if (setupDone) {
-      startSchedulers()
-      logger.info('[Boot] Schedulers started (deferred)')
-    }
+      // Schedulers (email reports + backup)
+      try {
+        const setupDone = getSetting(db, 'setup_complete') === 'true'
+        if (setupDone) {
+          const { startSchedulers } = await import('./mailer/mailerService')
+          startSchedulers()
+          logger.info('[Boot] Schedulers started (deferred)')
+        }
+      } catch (e) { logger.error('[Boot] Scheduler error:', e) }
+    })()
   })
 
   app.on('activate', () => {
