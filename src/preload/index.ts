@@ -150,6 +150,12 @@ const api = {
     testPrint:    ()               => invoke(CH.HARDWARE_TEST_PRINT),
     printSale:    (saleId: number) => invoke(CH.HARDWARE_PRINT, { saleId }),
   },
+  sync: {
+    getConfig:  ()                 => invoke('sync:getConfig'),
+    saveConfig: (cfg: unknown)     => invoke('sync:saveConfig', cfg),
+    runNow:     ()                 => invoke('sync:runNow'),
+    status:     ()                 => invoke('sync:status'),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)
