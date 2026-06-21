@@ -409,6 +409,14 @@ UPDATE products SET pricing_mode = 'unit' WHERE has_bulk_pricing = 0 OR has_bulk
 -- know whether 'quantity' means pieces or cartons.
 ALTER TABLE sale_items ADD COLUMN sell_mode TEXT NOT NULL DEFAULT 'unit';
 `,
+
+  '010_supabase_is_sync.sql': `
+-- Add is_sync boolean to core tables (0 = changed, 1 = synced).
+-- Existing rows default to 1 (treat as synced to avoid a full re-push).
+ALTER TABLE products  ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE sales     ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE customers ADD COLUMN is_sync INTEGER NOT NULL DEFAULT 1;
+`,
 }
 
 
