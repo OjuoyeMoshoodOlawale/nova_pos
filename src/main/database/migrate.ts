@@ -534,10 +534,10 @@ CREATE TABLE IF NOT EXISTS supabase_config (
 );
 INSERT OR IGNORE INTO supabase_config (id) VALUES (1);
 `,
-  now'))
-    )
-  `)
+}
 
+// ─── Migration runner ──────────────────────────────────
+export function runMigrations(db: DB): void {
   const applied = new Set(
     (db.prepare('SELECT name FROM _migrations').all() as { name: string }[])
       .map(r => r.name)
