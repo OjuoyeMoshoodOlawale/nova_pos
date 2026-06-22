@@ -485,15 +485,19 @@ export function registerSettingsHandlers(db: DB): void {
   })
 
   // ── Database reset (developer/admin only) ─────────────
+  // We do NOT delete the DB file here: the SQLite connection is still open,
+  // so on Windows the unlink fails (the file is locked by our own open
+  // handle) and the data silently survives the relaunch. Instead we drop a
+  // one-shot sentinel file and relaunch. On the next boot — BEFORE any DB
+  // connection is opened — the app deletes the database (see maybeResetDatabase
+  // in main/index.ts). By then the previous process that held the handle has
+  // exited, so the unlink is guaranteed to succeed. Migrations then recreate
+  // an empty DB and `setup_complete=false` re-triggers the Setup Wizard.
   safeHandle('settings:resetDatabase', async (_e, confirm: string) => {
     if (confirm !== 'RESET') throw new Error('Confirmation code must be RESET')
-    const dbPath = path.join(app.getPath('userData'), 'novapos.db')
-    logger.warn(`[Settings] DATABASE RESET requested — deleting ${dbPath}`)
-    // Delete the DB file + WAL/SHM sidecars
-    for (const ext of ['', '-wal', '-shm']) {
-      try { fs.unlinkSync(dbPath + ext) } catch { /* may not exist */ }
-    }
-    logger.warn('[Settings] Database deleted — relaunching app')
+    const sentinel = path.join(app.getPath('userData'), '.reset-pending')
+    fs.writeFileSync(sentinel, new Date().toISOString())
+    logger.warn('[Settings] Fresh-start armed — relaunching to wipe database on next boot')
     app.relaunch()
     app.exit(0)
   })

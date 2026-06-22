@@ -1,6 +1,7 @@
 // src/main/index.ts
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { join }  from 'node:path'
+import fs        from 'node:fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { getDb }              from './database/connection'
 import { runMigrations }      from './database/migrate'
@@ -145,6 +146,29 @@ function showAbout(): void {
 
 // ─── BOOT SEQUENCE ────────────────────────────────────────
 
+// ── Pending "fresh start" wipe ────────────────────────────
+// Settings → Delete All Data arms this by dropping a `.reset-pending`
+// sentinel and relaunching. We run here, at the very start of boot and
+// BEFORE getDb() opens any connection, so there is no open file handle to
+// block the unlink (the previous process that held it has already exited).
+function maybeResetDatabase(): void {
+  const sentinel = join(app.getPath('userData'), '.reset-pending')
+  if (!fs.existsSync(sentinel)) return
+
+  const dbPath = join(app.getPath('userData'), 'novapos.db')
+  logger.warn('[Reset] Fresh-start requested — wiping database before open')
+  for (const suffix of ['', '-wal', '-shm', '-journal']) {
+    const f = dbPath + suffix
+    try {
+      if (fs.existsSync(f)) fs.unlinkSync(f)
+    } catch (e) {
+      logger.error(`[Reset] Could not delete ${f}: ${(e as Error).message}`)
+    }
+  }
+  try { fs.unlinkSync(sentinel) } catch { /* ignore */ }
+  logger.warn('[Reset] Database wiped — Setup Wizard will run on this fresh start')
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.novapos.desktop')
 
@@ -166,6 +190,9 @@ app.whenReady().then(async () => {
   createSplash()
 
   // ── 1. Database setup (fast on subsequent runs) ─────────
+  // Honour any pending fresh-start wipe BEFORE the connection is opened.
+  maybeResetDatabase()
+
   const db = getDb()
   runMigrations(db)
   logger.info('[Boot] Database ready')
