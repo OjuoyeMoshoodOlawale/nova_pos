@@ -61,13 +61,17 @@ export const useCartStore = create<CartState>((set, get) => ({
     const stockQty  = product.stock_qty ?? 0
     const key       = itemKey(product.id, mode)
 
+    // Mode-aware stock cap: pieces stay as-is, bulk divides by units_per_bulk
+    const upb = (product as any).units_per_bulk ?? 1
+    const maxQty = isBulk && upb > 1 ? Math.floor(stockQty / upb) : stockQty
+
     // ── Apply group discount ──────────────────────────
     const { groupDiscount } = get()
     const effectiveDisc = groupDiscount > 0 ? groupDiscount : 0
     const effectivePrice = +(unitPrice * (1 - effectiveDisc / 100)).toFixed(2)
 
     // ── Stock validation ──────────────────────────────
-    if (stockQty <= 0) return 'out_of_stock'
+    if (maxQty <= 0) return 'out_of_stock'
 
     let result: 'added'|'at_limit' = 'added'
 
@@ -75,13 +79,13 @@ export const useCartStore = create<CartState>((set, get) => ({
       const existing = s.items.find(i => itemKey(i.product_id, i.sell_mode as SellMode) === key)
       const currentQty = existing?.quantity ?? 0
 
-      if (currentQty >= stockQty) {
+      if (currentQty >= maxQty) {
         result = 'at_limit'
         return s  // no change
       }
 
       if (existing) {
-        const newQty = Math.min(currentQty + 1, stockQty)
+        const newQty = Math.min(currentQty + 1, maxQty)
         if (newQty === currentQty) { result = 'at_limit'; return s }
         return {
           items: s.items.map(i =>
@@ -175,10 +179,14 @@ export const useCartStore = create<CartState>((set, get) => ({
   updateQty(productId, mode, qty) {
     const key = itemKey(productId, mode)
     set(s => {
-      const item = s.items.find(i => itemKey(i.product_id, i.sell_mode as SellMode) === key)
+      const item: any = s.items.find(i => itemKey(i.product_id, i.sell_mode as SellMode) === key)
       if (!item) return s
       if (qty <= 0) return { items: s.items.filter(i => itemKey(i.product_id, i.sell_mode as SellMode) !== key) }
-      const safeQty = Math.min(qty, item.stock_qty)  // ← cap at available stock
+      // Cap at the mode-aware max: bulk mode divides by units_per_bulk
+      const isBulk = mode === 'bulk'
+      const upb = item._upb ?? 1
+      const maxQty = isBulk && upb > 1 ? Math.floor((item.stock_qty || 0) / upb) : (item.stock_qty || 0)
+      const safeQty = Math.min(qty, maxQty)
       return {
         items: s.items.map(i =>
           itemKey(i.product_id, i.sell_mode as SellMode) === key
