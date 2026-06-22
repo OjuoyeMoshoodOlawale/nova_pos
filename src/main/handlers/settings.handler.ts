@@ -484,6 +484,20 @@ export function registerSettingsHandlers(db: DB): void {
     }
   })
 
+  // ── Database reset (developer/admin only) ─────────────
+  safeHandle('settings:resetDatabase', async (_e, confirm: string) => {
+    if (confirm !== 'RESET') throw new Error('Confirmation code must be RESET')
+    const dbPath = path.join(app.getPath('userData'), 'novapos.db')
+    logger.warn(`[Settings] DATABASE RESET requested — deleting ${dbPath}`)
+    // Delete the DB file + WAL/SHM sidecars
+    for (const ext of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(dbPath + ext) } catch { /* may not exist */ }
+    }
+    logger.warn('[Settings] Database deleted — relaunching app')
+    app.relaunch()
+    app.exit(0)
+  })
+
   // ── Supabase sync ─────────────────────────────────────
 
   safeHandle('sync:getConfig', () => {
