@@ -39,7 +39,16 @@ function idbMeta(key, val) {
 let sb = null
 const getCfg = () => { try { return JSON.parse(localStorage.getItem('novapos_cfg') || 'null') } catch { return null } }
 const saveCfg = c => localStorage.setItem('novapos_cfg', JSON.stringify(c))
-const initSB = c => { sb = supabase.createClient(c.url, c.key) }
+// Accept a full URL, a scheme-less host, or just a project ref and return a
+// valid absolute Supabase URL (matches the desktop app's normalizer).
+const normalizeSupabaseUrl = raw => {
+  let u = (raw || '').trim().replace(/\/+$/, '')
+  if (!u) return u
+  if (/^https?:\/\//i.test(u)) return u
+  if (!u.includes('.') && !u.includes('/')) return `https://${u}.supabase.co`
+  return `https://${u}`
+}
+const initSB = c => { sb = supabase.createClient(normalizeSupabaseUrl(c.url), c.key) }
 
 async function pullData(cb) {
   let total = 0
@@ -105,7 +114,7 @@ function renderSetup() {
       </div>
     </div>`
   document.getElementById('btn-go').onclick = async () => {
-    const url = document.getElementById('su').value.trim()
+    const url = normalizeSupabaseUrl(document.getElementById('su').value)
     const key = document.getElementById('sk').value.trim()
     const name = document.getElementById('sn').value.trim() || 'My Store'
     if (!url || !key) return alert('Enter URL and key')
