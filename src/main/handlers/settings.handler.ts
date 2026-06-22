@@ -46,7 +46,6 @@ function safeUserDataPath(): string {
   } catch { /* fall through */ }
 
   // 2 — Windows %APPDATA%
-ova-pos
   if (process.platform === 'win32') {
     const appdata = process.env.APPDATA || process.env.LOCALAPPDATA || ''
     if (appdata) return path.join(appdata, 'nova-pos')
@@ -500,6 +499,13 @@ export function registerSettingsHandlers(db: DB): void {
     logger.warn('[Settings] Fresh-start armed — relaunching to wipe database on next boot')
     app.relaunch()
     app.exit(0)
+  })
+
+  // Renderer crash logging — the ErrorBoundary forwards uncaught UI errors here
+  // so they land in the same log file as main-process errors for QA/support.
+  safeHandle('settings:logError', (_e, msg: string) => {
+    logger.error(`[Renderer] ${msg}`)
+    return { logged: true }
   })
 
   // ── Supabase sync ─────────────────────────────────────

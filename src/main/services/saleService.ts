@@ -1,5 +1,6 @@
 // src/main/services/saleService.ts
 import type { DB } from '../database/connection'
+import type { JSValue } from 'node-sqlite3-wasm'
 import { withTx } from '../database/connection'
 import { format } from 'date-fns'
 import { CompleteSaleInput, CompleteSaleResult, Sale, SaleDetail, SaleItem, PaymentRecord } from '@shared/types'
@@ -216,7 +217,7 @@ export function voidSale(db: DB, saleId: number, reason: string, userId: number)
     db.prepare(`UPDATE sales SET status = 'voided', void_reason = ? WHERE id = ?`)
       .run([reason, saleId])
 
-    const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as SaleItem[]
+    const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as unknown as SaleItem[]
     for (const item of items) {
       const prod = db.prepare('SELECT stock_qty, units_per_bulk FROM products WHERE id = ?').get([item.product_id]) as
         { stock_qty: number; units_per_bulk: number } | undefined
@@ -282,7 +283,7 @@ export function getSales(
     JOIN users u ON s.served_by = u.id
     ${clause}
     ORDER BY s.sale_date DESC LIMIT 500
-  `).all(params) as Sale[]
+  `).all(params as JSValue[]) as unknown as Sale[]
 }
 
 export function getSaleById(db: DB, id: number): SaleDetail | null {
@@ -292,10 +293,10 @@ export function getSaleById(db: DB, id: number): SaleDetail | null {
     LEFT JOIN customers c ON s.customer_id = c.id
     JOIN users u ON s.served_by = u.id
     WHERE s.id = ?
-  `).get([id]) as Sale | undefined
+  `).get([id]) as unknown as Sale | undefined
   if (!sale) return null
 
-  const items    = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([id]) as SaleItem[]
-  const payments = db.prepare('SELECT * FROM payments WHERE sale_id = ?').all([id]) as PaymentRecord[]
+  const items    = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([id]) as unknown as SaleItem[]
+  const payments = db.prepare('SELECT * FROM payments WHERE sale_id = ?').all([id]) as unknown as PaymentRecord[]
   return { ...sale, items, payments }
 }

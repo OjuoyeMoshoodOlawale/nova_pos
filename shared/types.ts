@@ -9,6 +9,8 @@ export type UserRole = 'admin' | 'manager' | 'cashier'
 export type NetworkMode = 'standalone' | 'server' | 'client'
 export type PaymentMethod = 'cash' | 'card' | 'transfer' | 'credit'
 export type SaleStatus = 'completed' | 'voided' | 'held'
+// How a line item is sold: as loose pieces ('unit') or as a bulk pack ('bulk')
+export type SellMode = 'unit' | 'bulk'
 export type AdjustReason = 'opening_balance' | 'restock' | 'damage' | 'theft' | 'correction' | 'sale' | 'return'
 export type PurchaseOrderStatus = 'pending' | 'partial' | 'received' | 'cancelled'
 export type BusinessType = 'retail' | 'restaurant' | 'pharmacy' | 'salon' | 'electronics' | 'supermarket' | 'other'
@@ -143,6 +145,18 @@ export interface Product {
   is_active: boolean
   created_at: string
   updated_at: string
+  // ── Bulk pricing (migration 002) ──────────────────────
+  pricing_mode?: 'unit' | 'both' | 'bulk'
+  has_bulk_pricing?: boolean
+  bulk_unit?: string | null
+  units_per_bulk?: number
+  bulk_buying_price?: number
+  bulk_selling_price?: number
+  image_data?: string | null
+  // ── Scheduled price change (migration 008) ────────────
+  pending_sell_price?: number | null
+  pending_bulk_price?: number | null
+  price_switch_at_qty?: number | null
 }
 
 export type CreateProductDto = Omit<

@@ -44,7 +44,9 @@ export function isSetupComplete(db: DB): boolean {
 // ─── Business profile ────────────────────────────────────
 export function getBusinessProfile(db: DB): BusinessProfile | null {
   const row = db.prepare('SELECT * FROM business_profile WHERE id = 1').get() as
-    | (BusinessProfile & { tax_inclusive: number; show_logo: number }) | undefined
+    unknown as
+    | (Omit<BusinessProfile, 'tax_inclusive' | 'show_logo'> & { tax_inclusive: number; show_logo: number })
+    | undefined
   if (!row) return null
   return { ...row, tax_inclusive: Boolean(row.tax_inclusive), show_logo: Boolean(row.show_logo) }
 }

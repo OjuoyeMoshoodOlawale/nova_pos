@@ -12,6 +12,7 @@
 // then sets mobile_synced=true after downloading.
 
 import logger from '../utils/logger'
+import type { JSValue } from 'node-sqlite3-wasm'
 import type { DB } from '../database/connection'
 
 // ─── Tables to sync (order matters: parents before children) ──
@@ -42,7 +43,7 @@ let syncTimer: ReturnType<typeof setInterval> | null = null
 // ─── Get config from local DB ───────────────────────────
 function getConfig(db: DB): SupabaseConfig | null {
   try {
-    const row = db.prepare('SELECT * FROM supabase_config WHERE id = 1').get() as SupabaseConfig | undefined
+    const row = db.prepare('SELECT * FROM supabase_config WHERE id = 1').get() as unknown as SupabaseConfig | undefined
     if (!row || !row.supabase_url || !row.supabase_key || !row.is_enabled) return null
     return row
   } catch {
@@ -94,7 +95,7 @@ async function pushTable(
   // Mark rows as synced in local DB
   const ids = rows.map(r => r.id)
   const placeholders = ids.map(() => '?').join(',')
-  db.prepare(`UPDATE ${table} SET is_sync = 1 WHERE id IN (${placeholders})`).run(ids)
+  db.prepare(`UPDATE ${table} SET is_sync = 1 WHERE id IN (${placeholders})`).run(ids as JSValue[])
 
   return rows.length
 }

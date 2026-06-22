@@ -21,10 +21,16 @@ export default function CustomersPage() {
 
   async function load() {
     setLoading(true)
-    const [r, g] = await Promise.all([window.api.customers.getAll(), window.api.customers.priceGroups()])
-    if (r.success) setCustomers(r.data)
-    if (g.success) setGroups(g.data)
-    setLoading(false)
+    try {
+      const [r, g] = await Promise.all([window.api.customers.getAll(), window.api.customers.priceGroups()])
+      if (r.success) setCustomers(r.data)
+      if (g.success) setGroups(g.data)
+    } catch (e) {
+      addToast('error', 'Could not load customers')
+      console.error('[Customers] load failed:', e)
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { load() }, [])
 

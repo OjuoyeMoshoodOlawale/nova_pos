@@ -4,7 +4,7 @@ import { useCartStore } from '../../store/cartStore'
 import { useAuthStore } from '../../store/authStore'
 import { useAppStore }  from '../../store/appStore'
 import { PaymentMethod } from '@shared/types'
-import { X, CreditCard, Banknotes, ArrowsRightLeft, CheckCircle, Printer } from 'lucide-react'
+import { X, CreditCard, CheckCircle, Printer } from 'lucide-react'
 
 interface Totals { subtotal:number; orderDiscountAmt:number; taxAmount:number; total:number }
 interface Props { totals: Totals; onClose:()=>void; onSuccess:(saleId:number,receiptNo:string)=>void }

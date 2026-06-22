@@ -27,10 +27,16 @@ export default function ProductList() {
 
   async function load() {
     setLoading(true)
-    const [pRes, cRes] = await Promise.all([window.api.products.getAll(), window.api.categories.getAll()])
-    if (pRes.success) setProducts(pRes.data)
-    if (cRes.success) setCategories(cRes.data)
-    setLoading(false)
+    try {
+      const [pRes, cRes] = await Promise.all([window.api.products.getAll(), window.api.categories.getAll()])
+      if (pRes.success) setProducts(pRes.data)
+      if (cRes.success) setCategories(cRes.data)
+    } catch (e) {
+      addToast('error', 'Could not load products')
+      console.error('[Inventory] load failed:', e)
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { load() }, [])
 
@@ -60,7 +66,7 @@ export default function ProductList() {
       // For bulk-only products, stock_qty IS in cartons (units_per_bulk=1)
       // so show the bulk_unit name. For 'both', show pieces + pack equivalent.
       const isBulkOnly = p.pricing_mode === 'bulk'
-      const isBoth = p.pricing_mode === 'both' && p.units_per_bulk > 1
+      const isBoth = p.pricing_mode === 'both' && (p.units_per_bulk ?? 1) > 1
       const displayUnit = isBulkOnly ? (p.bulk_unit || p.unit) : p.unit
       const out = p.stock_qty <= 0
       const low = !out && p.stock_qty <= p.reorder_level
@@ -71,7 +77,7 @@ export default function ProductList() {
           </span>
           {isBoth && (
             <div className="text-[10px] text-slate-500">
-              {Math.round(p.stock_qty / p.units_per_bulk * 10) / 10} {p.bulk_unit} · reorder at {Math.round(p.reorder_level / p.units_per_bulk * 10) / 10}
+              {Math.round(p.stock_qty / (p.units_per_bulk ?? 1) * 10) / 10} {p.bulk_unit} · reorder at {Math.round(p.reorder_level / (p.units_per_bulk ?? 1) * 10) / 10}
             </div>
           )}
         </div>

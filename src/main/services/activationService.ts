@@ -12,7 +12,7 @@ export interface ActivationStatus {
 
 export function getActivationStatus(db: DB): ActivationStatus {
   const machineId = getMachineId()
-  const row = db.prepare('SELECT * FROM activation WHERE id = 1').get() as
+  const row = db.prepare('SELECT * FROM activation WHERE id = 1').get() as unknown as
     | ActivationRecord
     | undefined
 
@@ -46,5 +46,5 @@ export function activate(db: DB, key: string, businessName: string): ActivationR
   `).run([machineId, key.trim().toUpperCase(), businessName])
 
   logger.info(`[Activation] Software activated for: ${businessName}`)
-  return db.prepare('SELECT * FROM activation WHERE id = 1').get() as ActivationRecord
+  return db.prepare('SELECT * FROM activation WHERE id = 1').get() as unknown as ActivationRecord
 }

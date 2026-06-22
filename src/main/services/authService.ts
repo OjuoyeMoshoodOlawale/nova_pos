@@ -1,5 +1,6 @@
 // src/main/services/authService.ts
 import type { DB } from '../database/connection'
+import type { JSValue } from 'node-sqlite3-wasm'
 import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto'
 import { v4 as uuidv4 } from 'uuid'
 import { User, SessionUser, UserRole, CreateUserDto } from '@shared/types'
@@ -133,7 +134,7 @@ export function login(db: DB, username: string, password: string): SessionUser {
 
   const row = db
     .prepare('SELECT * FROM users WHERE username = ? AND is_active = 1')
-    .get([username]) as (User & { password_hash: string }) | undefined
+    .get([username]) as unknown as (User & { password_hash: string }) | undefined
 
   if (!row) {
     recordLoginFail(db, username)
@@ -161,7 +162,7 @@ export function logout(token: string): void {
 export function getAllUsers(db: DB): User[] {
   return (db.prepare(
     'SELECT id, full_name, username, role, is_active, created_at, updated_at FROM users ORDER BY full_name'
-  ).all() as User[]).map((u) => ({ ...u, is_active: Boolean(u.is_active) }))
+  ).all() as unknown as User[]).map((u) => ({ ...u, is_active: Boolean(u.is_active) }))
 }
 
 export function createUser(db: DB, dto: CreateUserDto): User {
@@ -178,7 +179,7 @@ export function createUser(db: DB, dto: CreateUserDto): User {
 
   return db.prepare(
     'SELECT id, full_name, username, role, is_active, created_at, updated_at FROM users WHERE id = ?'
-  ).get([Number(result.lastInsertRowid)]) as User
+  ).get([Number(result.lastInsertRowid)]) as unknown as User
 }
 
 export function changePassword(
@@ -216,9 +217,9 @@ export function updateUser(
   if (data.pin)       { validatePin(data.pin); sets.push('pin = ?'); vals.push(hashPin(data.pin)) }
 
   vals.push(userId) // WHERE id = ?
-  db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(vals)
+  db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(vals as JSValue[])
 
   return db.prepare(
     'SELECT id, full_name, username, role, is_active, created_at, updated_at FROM users WHERE id = ?'
-  ).get([userId]) as User
+  ).get([userId]) as unknown as User
 }

@@ -6,7 +6,7 @@
 //  4. Stock         — enter in units OR bulk count
 //  5. History tabs  — purchase history + price change history (edit mode)
 // ─────────────────────────────────────────────────────────────
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Product, Category } from '@shared/types'
 import { useAppStore } from '../../store/appStore'
 import {
@@ -30,6 +30,15 @@ const BULK_UNITS = [
   'carton','crate','dozen','pack','bag','bale',
   'bundle','case','pallet','sack','tray','gross',
 ]
+// Known pieces-per-bulk counts so users don't have to type them in.
+// Mirrors the table in StockReceiveModal.tsx.
+const BULK_UNIT_PRESETS: Record<string, number> = {
+  dozen: 12,
+  gross: 144,
+  crate: 24,
+  case:  12,
+  tray:  30,
+}
 // Margin targets shown in the price advisor table
 const MARGIN_TARGETS = [10, 15, 20, 25, 30, 35, 40]
 

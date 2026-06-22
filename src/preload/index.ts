@@ -50,6 +50,8 @@ const api = {
                                                   invoke('settings:backupLocal', opts),
     // Wipes the live DB — double-confirmed in main process via native dialog
     resetDatabase: (confirm: string) => invoke('settings:resetDatabase', confirm),
+    // Forwards a renderer-side crash (from the ErrorBoundary) to the main log file
+    logError:      (msg: string)     => invoke('settings:logError', msg),
   },
 
   // ── Network ────────────────────────────────────────────
@@ -86,13 +88,15 @@ const api = {
 
   // ── Customers ──────────────────────────────────────────
   customers: {
-    getAll:   ()                           => invoke(CH.CUSTOMER_ALL),
-    search:   (q: string)                  => invoke(CH.CUSTOMER_SEARCH, q),
-    getById:  (id: number)                 => invoke(CH.CUSTOMER_GET, id),
-    history:  (id: number)                 => invoke(CH.CUSTOMER_HISTORY, id),
-    create:   (d: unknown)                 => invoke(CH.CUSTOMER_CREATE, d),
-    update:   (id: number, d: unknown)     => invoke(CH.CUSTOMER_UPDATE, id, d),
-    archive:  (id: number)                 => invoke(CH.CUSTOMER_ARCHIVE, id),
+    getAll:        ()                              => invoke(CH.CUSTOMER_ALL),
+    search:        (q: string)                     => invoke(CH.CUSTOMER_SEARCH, q),
+    getById:       (id: number)                    => invoke(CH.CUSTOMER_GET, id),
+    history:       (id: number)                    => invoke(CH.CUSTOMER_HISTORY, id),
+    create:        (d: unknown)                    => invoke(CH.CUSTOMER_CREATE, d),
+    update:        (id: number, d: unknown)        => invoke(CH.CUSTOMER_UPDATE, id, d),
+    archive:       (id: number)                    => invoke(CH.CUSTOMER_ARCHIVE, id),
+    priceGroups:   ()                              => invoke('customers:priceGroups'),
+    setPriceGroup: (id: number, groupId: number|null) => invoke('customers:setPriceGroup', id, groupId),
   },
 
   // ── Suppliers ──────────────────────────────────────────

@@ -538,6 +538,19 @@ INSERT OR IGNORE INTO supabase_config (id) VALUES (1);
 
 // ─── Migration runner ──────────────────────────────────
 export function runMigrations(db: DB): void {
+  // Ensure the tracking table exists BEFORE we read from it. On a brand-new
+  // database — e.g. first install, or after a "Delete All Data" fresh start —
+  // _migrations does not exist yet (it is otherwise created inside migration
+  // 001), and SELECT-ing from a missing table throws "no such table". This is
+  // idempotent, so it is a no-op on databases that already have it.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL UNIQUE,
+      applied_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
   const applied = new Set(
     (db.prepare('SELECT name FROM _migrations').all() as { name: string }[])
       .map(r => r.name)

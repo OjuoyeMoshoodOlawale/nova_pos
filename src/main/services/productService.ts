@@ -1,5 +1,6 @@
 // src/main/services/productService.ts
 import type { DB } from '../database/connection'
+import type { JSValue } from 'node-sqlite3-wasm'
 import { withTx } from '../database/connection'
 import { Product, CreateProductDto, UpdateProductDto } from '@shared/types'
 import logger from '../utils/logger'
@@ -175,7 +176,7 @@ export function updateProduct(db: DB, id: number, dto: Record<string, unknown>, 
     }
   }
   vals.push(id)
-  db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(vals)
+  db.prepare(`UPDATE products SET ${sets.join(', ')} WHERE id = ?`).run(vals as JSValue[])
 
   const newCost = dto.cost_price         != null ? Number(dto.cost_price)          : before?.cost_price
   const newSell = dto.selling_price      != null ? Number(dto.selling_price)       : before?.selling_price
@@ -269,7 +270,7 @@ export function updatePrice(db: DB, input: PriceUpdateInput): Product {
   }
 
   vals.push(input.product_id)
-  db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals)
+  db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals as JSValue[])
 
   // Log to history (only the prices that actually changed)
   const appliedNow = input.mode === 'now' || p.stock_qty <= (input.after_qty ?? 0)
@@ -391,7 +392,7 @@ export function receiveStock(db: DB, input: StockReceiveInput): void {
     // 'keep' mode: only update stock and cost
 
     vals.push(input.product_id)
-    db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals)
+    db.prepare(`UPDATE products SET ${updates.join(', ')} WHERE id = ?`).run(vals as JSValue[])
 
     // ── Selling price history log ─────────────────────────
     // Log to selling_price_history whenever cost OR sell price changes during a restock.
