@@ -69,19 +69,32 @@ export default function SyncSettings() {
   }
 
   async function copySchema() {
+    // The schema SQL is embedded here so it works in Electron (no fetch needed).
+    // Keep this in sync with docs/supabase_schema.sql.
+    const sql = `-- NovaPOS Supabase Cloud Schema — run once in SQL Editor
+CREATE TABLE IF NOT EXISTS categories (id SERIAL PRIMARY KEY, name TEXT NOT NULL, description TEXT, created_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS suppliers (id SERIAL PRIMARY KEY, name TEXT NOT NULL, phone TEXT, email TEXT, address TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, name TEXT NOT NULL, sku TEXT, barcode TEXT, category_id INTEGER, supplier_id INTEGER, unit TEXT DEFAULT 'pcs', cost_price NUMERIC DEFAULT 0, selling_price NUMERIC DEFAULT 0, stock_qty NUMERIC DEFAULT 0, reorder_level NUMERIC DEFAULT 5, is_active INTEGER DEFAULT 1, image_data TEXT, bulk_unit TEXT, units_per_bulk NUMERIC DEFAULT 1, bulk_buying_price NUMERIC DEFAULT 0, bulk_selling_price NUMERIC DEFAULT 0, has_bulk_pricing INTEGER DEFAULT 0, pending_sell_price NUMERIC, pending_bulk_price NUMERIC, price_switch_at_qty NUMERIC, pricing_mode TEXT DEFAULT 'unit', created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, name TEXT NOT NULL, phone TEXT, email TEXT, address TEXT, notes TEXT, price_group_id INTEGER, created_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS sales (id SERIAL PRIMARY KEY, receipt_no TEXT UNIQUE NOT NULL, customer_id INTEGER, served_by INTEGER, subtotal NUMERIC, discount_pct NUMERIC DEFAULT 0, discount_amt NUMERIC DEFAULT 0, tax_amount NUMERIC DEFAULT 0, total_amount NUMERIC NOT NULL, amount_paid NUMERIC, change_given NUMERIC DEFAULT 0, status TEXT DEFAULT 'completed', sale_date TIMESTAMPTZ DEFAULT now(), items_json TEXT, total_cost_amount NUMERIC DEFAULT 0, tax_rate_applied NUMERIC DEFAULT 7.5, tax_inclusive_applied INTEGER DEFAULT 0, mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS sale_items (id SERIAL PRIMARY KEY, sale_id INTEGER NOT NULL, product_id INTEGER NOT NULL, product_name TEXT NOT NULL, unit_price NUMERIC NOT NULL, quantity NUMERIC NOT NULL, discount_pct NUMERIC DEFAULT 0, line_total NUMERIC NOT NULL, cost_price NUMERIC DEFAULT 0, sell_mode TEXT DEFAULT 'unit', mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS payments (id SERIAL PRIMARY KEY, sale_id INTEGER NOT NULL, method TEXT NOT NULL, amount NUMERIC NOT NULL, reference TEXT, created_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS stock_adjustments (id SERIAL PRIMARY KEY, product_id INTEGER NOT NULL, adjusted_by INTEGER, qty_before NUMERIC, qty_change NUMERIC, qty_after NUMERIC, reason TEXT, notes TEXT, created_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+CREATE TABLE IF NOT EXISTS activity_log (id SERIAL PRIMARY KEY, user_id INTEGER, action TEXT, entity_type TEXT, entity_id INTEGER, detail TEXT, created_at TIMESTAMPTZ DEFAULT now(), mobile_synced BOOLEAN DEFAULT false);
+
+-- Enable RLS + open policies (anon key can read/write)
+DO $$ DECLARE t TEXT; BEGIN
+  FOR t IN SELECT unnest(ARRAY['categories','suppliers','products','customers','sales','sale_items','payments','stock_adjustments','activity_log']) LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('CREATE POLICY IF NOT EXISTS allow_all ON %I FOR ALL USING (true) WITH CHECK (true)', t);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%I_mobile_synced ON %I(mobile_synced) WHERE mobile_synced = false', t, t);
+  END LOOP;
+END $$;`
     try {
-      const r = await fetch('./supabase_schema.sql')
-      let sql = ''
-      if (r.ok) {
-        sql = await r.text()
-      } else {
-        // Fallback: read from the IPC if fetch doesn't work
-        sql = 'Could not load schema — copy it from docs/supabase_schema.sql in the project folder'
-      }
       await navigator.clipboard.writeText(sql)
-      addToast('success', 'Schema SQL copied to clipboard!')
+      addToast('success', 'Schema SQL copied to clipboard! Paste it in Supabase SQL Editor and click Run.')
     } catch {
-      addToast('error', 'Could not copy — open docs/supabase_schema.sql manually')
+      addToast('error', 'Could not copy — open docs/supabase_schema.sql from the project folder')
     }
   }
 
