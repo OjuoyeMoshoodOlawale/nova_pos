@@ -15,6 +15,11 @@ files:
 # Embed all node_modules into the asar
 asar: true
 
+# The SQLite engine ships a .wasm binary; keep node-sqlite3-wasm OUTSIDE the
+# asar so the WebAssembly file is loadable from a real path at runtime.
+asarUnpack:
+  - "**/node_modules/node-sqlite3-wasm/**"
+
 win:
   icon: resources/icon.ico
   target:
@@ -49,10 +54,10 @@ linux:
   artifactName: NovaPOS-${version}.${ext}
   category: Office
 
-# Auto-update config (optional — configure your update server)
-publish:
-  provider: generic
-  url: https://your-update-server.com/updates/
+# Auto-update is not wired up in code (no electron-updater integration yet),
+# so we explicitly disable publishing to avoid generating update metadata that
+# points at a non-existent server. Configure this when an update server exists.
+publish: null
 
 # Prevent source maps in production
 extraMetadata:
