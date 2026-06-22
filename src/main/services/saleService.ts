@@ -62,6 +62,9 @@ export function completeSale(db: DB, input: CompleteSaleInput): CompleteSaleResu
         discount_pct: item.discount_pct,
         line_total:   item.line_total,
         sell_mode:    (item as any).sell_mode ?? 'unit',
+        // Pack size USED for this line, snapshotted so a later product
+        // re-pack can never make a void reverse the wrong number of pieces.
+        units_per_bulk: perBulk,
       }
     })
 
@@ -217,23 +220,54 @@ export function voidSale(db: DB, saleId: number, reason: string, userId: number)
     db.prepare(`UPDATE sales SET status = 'voided', void_reason = ? WHERE id = ?`)
       .run([reason, saleId])
 
-    const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as unknown as SaleItem[]
-    for (const item of items) {
-      const prod = db.prepare('SELECT stock_qty, units_per_bulk FROM products WHERE id = ?').get([item.product_id]) as
-        { stock_qty: number; units_per_bulk: number } | undefined
+    // Prefer the immutable items_json snapshot (migration 007+). It records the
+    // exact pack size used per line, so a void reverses precisely what the sale
+    // deducted even if the product was re-packed afterwards. Fall back to the
+    // sale_items table + the product's CURRENT units_per_bulk only for legacy
+    // pre-snapshot sales.
+    const saleRow = db.prepare('SELECT items_json FROM sales WHERE id = ?').get([saleId]) as
+      { items_json: string | null } | undefined
+
+    type RestockLine = { product_id: number; quantity: number; sell_mode?: string; units_per_bulk?: number }
+    let lines: RestockLine[]
+
+    if (saleRow?.items_json) {
+      lines = (JSON.parse(saleRow.items_json) as RestockLine[]).map(l => ({
+        product_id:     l.product_id,
+        quantity:       l.quantity,
+        sell_mode:      l.sell_mode ?? 'unit',
+        units_per_bulk: l.units_per_bulk ?? 1,
+      }))
+    } else {
+      const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([saleId]) as unknown as SaleItem[]
+      lines = items.map(item => {
+        const prod = db.prepare('SELECT units_per_bulk FROM products WHERE id = ?').get([item.product_id]) as
+          { units_per_bulk: number } | undefined
+        return {
+          product_id:     item.product_id,
+          quantity:       item.quantity,
+          sell_mode:      (item as any).sell_mode ?? 'unit',
+          units_per_bulk: prod?.units_per_bulk ?? 1,
+        }
+      })
+    }
+
+    for (const line of lines) {
+      const prod = db.prepare('SELECT stock_qty FROM products WHERE id = ?').get([line.product_id]) as
+        { stock_qty: number } | undefined
       const qtyBefore = prod?.stock_qty ?? 0
       // Restock in PIECES. A bulk line's quantity is in cartons, so convert
-      // back using the product's units_per_bulk (mirrors the sale deduction).
-      const isBulk    = (item as any).sell_mode === 'bulk'
-      const perBulk   = prod?.units_per_bulk ?? 1
-      const piecesBack = isBulk ? item.quantity * perBulk : item.quantity
-      const qtyAfter  = qtyBefore + piecesBack
+      // back using the SNAPSHOTTED pack size (mirrors the sale deduction).
+      const isBulk     = line.sell_mode === 'bulk'
+      const perBulk    = line.units_per_bulk ?? 1
+      const piecesBack = isBulk ? line.quantity * perBulk : line.quantity
+      const qtyAfter   = qtyBefore + piecesBack
 
-      db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run([qtyAfter, item.product_id])
+      db.prepare('UPDATE products SET stock_qty = ? WHERE id = ?').run([qtyAfter, line.product_id])
       db.prepare(`
         INSERT INTO stock_adjustments (product_id, adjusted_by, qty_before, qty_change, qty_after, reason, notes)
         VALUES (?, ?, ?, ?, ?, 'correction', ?)
-      `).run([item.product_id, userId, qtyBefore, piecesBack, qtyAfter, `Void of sale #${saleId}`])
+      `).run([line.product_id, userId, qtyBefore, piecesBack, qtyAfter, `Void of sale #${saleId}`])
     }
 
     db.prepare(`
