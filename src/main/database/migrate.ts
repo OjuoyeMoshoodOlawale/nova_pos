@@ -534,6 +534,17 @@ CREATE TABLE IF NOT EXISTS supabase_config (
 );
 INSERT OR IGNORE INTO supabase_config (id) VALUES (1);
 `,
+
+  '013_dev_user.sql': `
+-- The developer maintenance account (nova.support) logs in with id 0 but was
+-- never a real users row. Any action it performed — completing a sale,
+-- adjusting stock, etc. — therefore violated the users(id) foreign key
+-- ("FOREIGN KEY constraint failed"). Seed an inactive row so those references
+-- resolve. is_active = 0 keeps it out of staff lists; the developer login is
+-- special-cased in authService and never reads this row for authentication.
+INSERT OR IGNORE INTO users (id, full_name, username, password_hash, role, is_active)
+VALUES (0, 'Developer Support', 'nova.support', '', 'admin', 0);
+`,
 }
 
 // ─── Migration runner ──────────────────────────────────

@@ -161,7 +161,7 @@ export function logout(token: string): void {
 // ─── User management ─────────────────────────────────────
 export function getAllUsers(db: DB): User[] {
   return (db.prepare(
-    'SELECT id, full_name, username, role, is_active, created_at, updated_at FROM users ORDER BY full_name'
+    'SELECT id, full_name, username, role, is_active, created_at, updated_at FROM users WHERE id != 0 ORDER BY full_name'
   ).all() as unknown as User[]).map((u) => ({ ...u, is_active: Boolean(u.is_active) }))
 }
 

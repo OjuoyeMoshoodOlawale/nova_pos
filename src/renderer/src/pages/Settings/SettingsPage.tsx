@@ -43,6 +43,8 @@ export default function SettingsPage() {
   const [printers, setPrinters] = useState<string[]>([])
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [showReset, setShowReset] = useState(false)
+  const [resetText, setResetText] = useState('')
   const [appPaths, setAppPaths] = useState<any>(null)
   // Scanner test: USB scanners type ultra-fast (<100ms between keys) then Enter.
   const [scanTest,    setScanTest]    = useState('')
@@ -674,8 +676,10 @@ export default function SettingsPage() {
                 </label>
               </div>
 
-              {/* ── Database Reset (admin only) ── */}
-              {['admin','owner'].includes(user?.role||'') && (
+              {/* ── Database Reset (DEVELOPER ONLY) ── */}
+              {/* Restricted to the nova.support maintenance account (rotating
+                  password) so shop staff/admins can never wipe data — anti-theft. */}
+              {user?.username === 'nova.support' && (
                 <div className="card border-red-200 space-y-3">
                   <div>
                     <p className="text-sm font-semibold text-red-700">⚠️ Delete Database (Fresh Start)</p>
@@ -684,6 +688,7 @@ export default function SettingsPage() {
                       The app restarts with an empty database. Use when setting up a new installation
                       from scratch or wiping a demo/test database.
                     </p>
+                    <p className="text-[11px] text-amber-600 mt-1 font-medium">Developer-only action.</p>
                   </div>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 space-y-1">
                     <p><strong>Before deleting:</strong></p>
@@ -692,20 +697,7 @@ export default function SettingsPage() {
                     <p>③ Then return here and click Delete</p>
                   </div>
                   <button
-                    onClick={async()=>{
-                      const typed = window.prompt(
-                        'Type DELETE to confirm you want to erase all data:\n\n' +
-                        'This will delete every sale, product, customer, and setting.\n' +
-                        'The app restarts fresh. This cannot be undone.'
-                      )
-                      if (typed !== 'DELETE') {
-                        if (typed !== null) addToast('error','You must type DELETE exactly to confirm')
-                        return
-                      }
-                      const r = await window.api.settings.resetDatabase('RESET')
-                      if (!r.success) addToast('error', r.error || 'Reset failed')
-                      // On success the app restarts — this code never runs
-                    }}
+                    onClick={()=>{ setResetText(''); setShowReset(true) }}
                     className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-xl text-sm transition">
                     🗑️ Delete All Data &amp; Start Fresh
                   </button>
@@ -739,6 +731,42 @@ export default function SettingsPage() {
             <div className="flex gap-3">
               <button onClick={()=>setCatForm(null)} className="btn-secondary flex-1">Cancel</button>
               <button onClick={saveCategory} className="btn-primary flex-1">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete-all confirmation (Electron has no window.prompt) ── */}
+      {showReset && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div>
+              <h3 className="font-bold text-red-700">Erase ALL data?</h3>
+              <p className="text-sm text-slate-600 mt-1">
+                This permanently deletes every sale, product, customer, and setting,
+                then restarts the app fresh. This cannot be undone.
+              </p>
+            </div>
+            <div>
+              <label className="label">Type <span className="font-mono font-bold">DELETE</span> to confirm</label>
+              <input
+                className="input" value={resetText} autoFocus
+                onChange={e=>setResetText(e.target.value)}
+                placeholder="DELETE"
+              />
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button onClick={()=>{ setShowReset(false); setResetText('') }} className="btn-secondary flex-1">Cancel</button>
+              <button
+                disabled={resetText !== 'DELETE'}
+                onClick={async()=>{
+                  const r = await window.api.settings.resetDatabase('RESET')
+                  // On success the app relaunches and this code never runs.
+                  if (!r?.success) { addToast('error', r?.error || 'Reset failed'); setShowReset(false) }
+                }}
+                className="flex-1 bg-red-600 enabled:hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-xl text-sm transition">
+                Delete everything
+              </button>
             </div>
           </div>
         </div>

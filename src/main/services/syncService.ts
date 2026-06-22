@@ -41,11 +41,24 @@ interface SupabaseConfig {
 let syncTimer: ReturnType<typeof setInterval> | null = null
 
 // ─── Get config from local DB ───────────────────────────
+// Accept a full URL, a scheme-less host, or just a project ref and always
+// return a valid absolute Supabase URL. Users frequently paste only the
+// project ref (e.g. "abcd1234"), which makes fetch() throw "Failed to parse
+// URL" in the main process (and silently resolve against the app origin in the
+// renderer, giving a false "connection OK").
+export function normalizeSupabaseUrl(raw: string): string {
+  let u = (raw || '').trim().replace(/\/+$/, '')
+  if (!u) return u
+  if (/^https?:\/\//i.test(u)) return u                    // already absolute
+  if (!u.includes('.') && !u.includes('/')) return `https://${u}.supabase.co` // bare project ref
+  return `https://${u}`                                    // host without scheme
+}
+
 function getConfig(db: DB): SupabaseConfig | null {
   try {
     const row = db.prepare('SELECT * FROM supabase_config WHERE id = 1').get() as unknown as SupabaseConfig | undefined
     if (!row || !row.supabase_url || !row.supabase_key || !row.is_enabled) return null
-    return row
+    return { ...row, supabase_url: normalizeSupabaseUrl(row.supabase_url) }
   } catch {
     return null
   }

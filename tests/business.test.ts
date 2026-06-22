@@ -319,3 +319,20 @@ describe('Inventory report', () => {
     expect(rep.outOfStockItems.length).toBe(1)
   })
 })
+
+describe('Developer account (FK integrity)', () => {
+  let db: DB
+  beforeEach(() => { db = freshDb() })
+
+  it('the developer maintenance user (id 0) can complete a sale', () => {
+    // Regression: dev login returns id 0; before migration 013 there was no
+    // users row with id 0, so served_by=0 hit a FOREIGN KEY constraint.
+    const u = db.prepare('SELECT id FROM users WHERE id = 0').get([]) as any
+    expect(u).toBeTruthy() // seeded by migration 013
+    const p = unitProduct(db)
+    const input = unitSale(p.id, 1); input.served_by = 0
+    expect(() => completeSale(db, input)).not.toThrow()
+    const after = db.prepare('SELECT stock_qty FROM products WHERE id=?').get([p.id]) as any
+    expect(after.stock_qty).toBe(49)
+  })
+})

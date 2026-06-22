@@ -4,6 +4,17 @@ import { useState, useEffect } from 'react'
 import { useAppStore } from '../../store/appStore'
 import { Cloud, CloudOff, RefreshCw, CheckCircle, AlertCircle, Copy, ExternalLink, Wifi } from 'lucide-react'
 
+// Mirror of the main-process normalizer: a bare project ref or scheme-less host
+// must become a full https URL, otherwise the renderer's fetch() resolves it
+// against the app's own origin and falsely reports the connection as OK.
+function normalizeSupabaseUrl(raw: string): string {
+  let u = (raw || '').trim().replace(/\/+$/, '')
+  if (!u) return u
+  if (/^https?:\/\//i.test(u)) return u
+  if (!u.includes('.') && !u.includes('/')) return `https://${u}.supabase.co`
+  return `https://${u}`
+}
+
 export default function SyncSettings() {
   const { addToast } = useAppStore()
   const [cfg, setCfg] = useState({ supabase_url: '', supabase_key: '', sync_interval: 300, is_enabled: 0 })
@@ -35,15 +46,16 @@ export default function SyncSettings() {
     }
     setTestResult('testing')
     try {
+      const baseUrl = normalizeSupabaseUrl(cfg.supabase_url)
       // Test 1: Can we reach the API at all?
-      const r1 = await fetch(`${cfg.supabase_url}/rest/v1/`, {
+      const r1 = await fetch(`${baseUrl}/rest/v1/`, {
         headers: { 'apikey': cfg.supabase_key, 'Authorization': `Bearer ${cfg.supabase_key}` },
       })
       if (r1.status === 401 || r1.status === 403) { setTestResult('auth-fail'); return }
       if (!r1.ok) { setTestResult('error'); return }
 
       // Test 2: Do the tables exist? Try SELECT from products
-      const r2 = await fetch(`${cfg.supabase_url}/rest/v1/products?select=id&limit=1`, {
+      const r2 = await fetch(`${baseUrl}/rest/v1/products?select=id&limit=1`, {
         headers: { 'apikey': cfg.supabase_key, 'Authorization': `Bearer ${cfg.supabase_key}` },
       })
       if (r2.status === 404 || (r2.status >= 400 && r2.status < 500)) {

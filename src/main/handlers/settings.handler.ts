@@ -520,12 +520,13 @@ export function registerSettingsHandlers(db: DB): void {
     supabase_url: string; supabase_key: string;
     sync_interval: number; is_enabled: number
   }) => {
+    const url = syncService.normalizeSupabaseUrl(cfg.supabase_url)
     db.prepare(`
       UPDATE supabase_config
       SET supabase_url = ?, supabase_key = ?, sync_interval = ?, is_enabled = ?,
           updated_at = datetime('now')
       WHERE id = 1
-    `).run([cfg.supabase_url, cfg.supabase_key, cfg.sync_interval, cfg.is_enabled ? 1 : 0])
+    `).run([url, cfg.supabase_key, cfg.sync_interval, cfg.is_enabled ? 1 : 0])
     // Restart the sync interval with the new config
     if (cfg.is_enabled) {
       syncService.startSyncInterval(db)
