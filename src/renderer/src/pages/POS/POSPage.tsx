@@ -97,9 +97,12 @@ function CartRow({ item, flash }: { item: CartItem; flash?: boolean }) {
   const [showDisc,  setShowDisc]  = useState(false)
   const [discInput, setDiscInput] = useState('')
   const mode    = item.sell_mode as SellMode
-  const atLimit = item.quantity >= item.stock_qty
-  const sku     = (item as any).sku as string | undefined
   const it      = item as any
+  // Mode-aware stock cap: for bulk mode, max = floor(pieces / units_per_bulk)
+  const upb      = it._upb ?? 1
+  const stockCap = mode === 'bulk' && upb > 1 ? Math.floor((item.stock_qty || 0) / upb) : (item.stock_qty || 0)
+  const atLimit  = item.quantity >= stockCap
+  const sku     = (item as any).sku as string | undefined
   // Show the unit/pack dropdown only when the product genuinely sells both ways.
   const canSwitchMode = it._pmode === 'both' && !!it._b_unit
 
@@ -143,10 +146,10 @@ function CartRow({ item, flash }: { item: CartItem; flash?: boolean }) {
             <Minus className="w-3 h-3" />
           </button>
           <input
-            type="number" min={1} max={item.stock_qty} value={item.quantity}
+            type="number" min={1} max={stockCap} value={item.quantity}
             onChange={e => {
               const n = parseInt(e.target.value)
-              if (!isNaN(n) && n > 0) updateQty(item.product_id, mode, Math.min(n, item.stock_qty))
+              if (!isNaN(n) && n > 0) updateQty(item.product_id, mode, n)
             }}
             onFocus={e => e.currentTarget.select()}
             className="w-10 text-center text-sm font-bold border border-slate-200 rounded py-0.5 focus:border-blue-400 focus:outline-none tabular-nums"
