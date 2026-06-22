@@ -96,12 +96,17 @@ export default function StockReceiveModal({ product: initProduct, onClose, onSav
     if (!product) { setPurchaseHistory([]); return }
 
     const p = product as any
+    const isBulkOnly = p.pricing_mode === 'bulk'
     setBulkUnit(p.bulk_unit || 'carton')
     setUnitsPerBulk(p.units_per_bulk || 1)
-    setUnitSellPrice(product.selling_price || 0)
+    // For bulk-only: selling_price may be 0, use bulk_selling_price instead
+    setUnitSellPrice(isBulkOnly ? (p.bulk_selling_price || p.selling_price || 0) : (product.selling_price || 0))
     setBulkSellPrice(p.bulk_selling_price || 0)
-    setBuyingCost(product.cost_price || 0)
-    setBulkSellEnabled(!!p.has_bulk_pricing)
+    // For bulk-only: cost_price = bulk_buying_price (set in ProductForm)
+    setBuyingCost(isBulkOnly ? (p.bulk_buying_price || product.cost_price || 0) : (product.cost_price || 0))
+    setBulkSellEnabled(!!p.has_bulk_pricing || isBulkOnly)
+    // Default buy mode: bulk for bulk-only, bulk for both (most common), unit for unit-only
+    setBuyMode(p.pricing_mode === 'unit' ? 'unit' : 'bulk')
 
     window.api.products.priceHistory(product.id).then((r: any) => {
       if (r.success) setPurchaseHistory(r.data)
