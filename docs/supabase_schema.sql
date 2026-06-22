@@ -1,179 +1,220 @@
--- ═══════════════════════════════════════════════════
--- NovaPOS Supabase Cloud Schema
--- Run this ONCE in your Supabase SQL Editor
--- to set up the cloud tables for sync.
--- ═══════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════
+-- NovaPOS — Supabase (PostgreSQL) Cloud Schema
+-- ───────────────────────────────────────────────────────────────
+-- Run this ONCE in the Supabase SQL Editor (paste → Run).
+-- It is safe to re-run: it drops and recreates the sync tables.
+--
+-- Design notes:
+--  • The desktop app is the single source of truth. Sync is ONE-WAY:
+--    PC → Supabase. These tables are a cloud mirror that the mobile
+--    viewer reads from. So they carry NO foreign-key constraints
+--    (push order must never be able to reject a row) and NO UNIQUE
+--    constraints beyond the primary key.
+--  • Columns mirror the local SQLite schema EXACTLY (the sync sends
+--    SELECT *), minus the local-only 'is_sync' flag, plus 'mobile_synced'.
+--  • Boolean-ish flags (is_active, has_bulk_pricing, tax_inclusive_applied)
+--    stay INTEGER because the app sends 0/1, not true/false.
+--  • 'id' is a plain BIGINT primary key: the app pushes its own ids and
+--    upserts on id (Prefer: resolution=merge-duplicates).
+-- ═══════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS categories (
-  id         SERIAL PRIMARY KEY,
-  name       TEXT    NOT NULL UNIQUE,
-  color      TEXT    NOT NULL    DEFAULT '#6366f1',
-  icon       TEXT,
-  is_active  INTEGER NOT NULL    DEFAULT 1,
-  created_at TEXT    NOT NULL    DEFAULT (datetime('now',
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+DROP TABLE IF EXISTS purchase_order_items CASCADE;
+DROP TABLE IF EXISTS purchase_orders      CASCADE;
+DROP TABLE IF EXISTS activity_log         CASCADE;
+DROP TABLE IF EXISTS stock_adjustments    CASCADE;
+DROP TABLE IF EXISTS payments             CASCADE;
+DROP TABLE IF EXISTS sale_items           CASCADE;
+DROP TABLE IF EXISTS sales                CASCADE;
+DROP TABLE IF EXISTS customers            CASCADE;
+DROP TABLE IF EXISTS products             CASCADE;
+DROP TABLE IF EXISTS suppliers            CASCADE;
+DROP TABLE IF EXISTS categories           CASCADE;
+
+CREATE TABLE categories (
+  id            BIGINT PRIMARY KEY,
+  name          TEXT,
+  color         TEXT        DEFAULT '#6366f1',
+  icon          TEXT,
+  is_active     INTEGER     DEFAULT 1,
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS suppliers (
-  id         SERIAL PRIMARY KEY,
-  name       TEXT    NOT NULL,
-  contact    TEXT,
-  phone      TEXT,
-  email      TEXT,
-  address    TEXT,
-  notes      TEXT,
-  is_active  INTEGER NOT NULL    DEFAULT 1,
-  created_at TEXT    NOT NULL    DEFAULT (datetime('now',
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE suppliers (
+  id            BIGINT PRIMARY KEY,
+  name          TEXT,
+  contact       TEXT,
+  phone         TEXT,
+  email         TEXT,
+  address       TEXT,
+  notes         TEXT,
+  is_active     INTEGER     DEFAULT 1,
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  updated_at    TIMESTAMPTZ DEFAULT now(),
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS products (
-  id            SERIAL PRIMARY KEY,
-  name          TEXT    NOT NULL,
-  sku           TEXT    UNIQUE,
-  barcode       TEXT    UNIQUE,
-  category_id   INTEGER REFERENCES categories(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE products (
+  id                  BIGINT PRIMARY KEY,
+  name                TEXT,
+  sku                 TEXT,
+  barcode             TEXT,
+  category_id         BIGINT,
+  supplier_id         BIGINT,
+  parent_id           BIGINT,
+  unit                TEXT        DEFAULT 'pcs',
+  cost_price          NUMERIC     DEFAULT 0,
+  selling_price       NUMERIC     DEFAULT 0,
+  stock_qty           NUMERIC     DEFAULT 0,
+  reorder_level       NUMERIC     DEFAULT 5,
+  image_path          TEXT,
+  description         TEXT,
+  is_active           INTEGER     DEFAULT 1,
+  created_at          TIMESTAMPTZ DEFAULT now(),
+  updated_at          TIMESTAMPTZ DEFAULT now(),
+  bulk_unit           TEXT,
+  units_per_bulk      NUMERIC     DEFAULT 1,
+  bulk_buying_price   NUMERIC     DEFAULT 0,
+  bulk_selling_price  NUMERIC     DEFAULT 0,
+  has_bulk_pricing    INTEGER     DEFAULT 0,
+  image_data          TEXT,
+  pending_sell_price  NUMERIC,
+  pending_bulk_price  NUMERIC,
+  price_switch_at_qty NUMERIC,
+  pricing_mode        TEXT        DEFAULT 'unit',
+  mobile_synced       BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS customers (
-  id         SERIAL PRIMARY KEY,
-  full_name  TEXT    NOT NULL,
-  phone      TEXT,
-  email      TEXT,
-  address    TEXT,
-  notes      TEXT,
-  balance    NUMERIC    NOT NULL    DEFAULT 0,
-  is_active  INTEGER NOT NULL    DEFAULT 1,
-  created_at TEXT    NOT NULL    DEFAULT (datetime('now',
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE customers (
+  id             BIGINT PRIMARY KEY,
+  full_name      TEXT,
+  phone          TEXT,
+  email          TEXT,
+  address        TEXT,
+  notes          TEXT,
+  balance        NUMERIC     DEFAULT 0,
+  is_active      INTEGER     DEFAULT 1,
+  created_at     TIMESTAMPTZ DEFAULT now(),
+  updated_at     TIMESTAMPTZ DEFAULT now(),
+  price_group_id BIGINT,
+  mobile_synced  BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS sales (
-  id           SERIAL PRIMARY KEY,
-  receipt_no   TEXT    NOT NULL UNIQUE,
-  customer_id  INTEGER REFERENCES customers(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE sales (
+  id                    BIGINT PRIMARY KEY,
+  receipt_no            TEXT,
+  customer_id           BIGINT,
+  served_by             BIGINT,
+  subtotal              NUMERIC     DEFAULT 0,
+  discount_pct          NUMERIC     DEFAULT 0,
+  discount_amt          NUMERIC     DEFAULT 0,
+  tax_amount            NUMERIC     DEFAULT 0,
+  total_amount          NUMERIC     DEFAULT 0,
+  amount_paid           NUMERIC     DEFAULT 0,
+  change_given          NUMERIC     DEFAULT 0,
+  status                TEXT        DEFAULT 'completed',
+  void_reason           TEXT,
+  notes                 TEXT,
+  sale_date             TIMESTAMPTZ DEFAULT now(),
+  created_at            TIMESTAMPTZ DEFAULT now(),
+  tax_rate_applied      NUMERIC     DEFAULT 7.5,
+  tax_inclusive_applied INTEGER     DEFAULT 0,
+  items_json            TEXT,
+  total_cost_amount     NUMERIC     DEFAULT 0,
+  mobile_synced         BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS sale_items (
-  id           SERIAL PRIMARY KEY,
-  sale_id      INTEGER NOT NULL REFERENCES sales(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE sale_items (
+  id            BIGINT PRIMARY KEY,
+  sale_id       BIGINT,
+  product_id    BIGINT,
+  product_name  TEXT,
+  unit_price    NUMERIC,
+  quantity      NUMERIC,
+  discount_pct  NUMERIC     DEFAULT 0,
+  line_total    NUMERIC,
+  cost_price    NUMERIC     DEFAULT 0,
+  sell_mode     TEXT        DEFAULT 'unit',
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS payments (
-  id        SERIAL PRIMARY KEY,
-  sale_id   INTEGER NOT NULL REFERENCES sales(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE payments (
+  id            BIGINT PRIMARY KEY,
+  sale_id       BIGINT,
+  method        TEXT,
+  amount        NUMERIC,
+  reference     TEXT,
+  paid_at       TIMESTAMPTZ DEFAULT now(),
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS stock_adjustments (
-  id          SERIAL PRIMARY KEY,
-  product_id  INTEGER NOT NULL REFERENCES products(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE stock_adjustments (
+  id            BIGINT PRIMARY KEY,
+  product_id    BIGINT,
+  adjusted_by   BIGINT,
+  qty_before    NUMERIC,
+  qty_change    NUMERIC,
+  qty_after     NUMERIC,
+  reason        TEXT,
+  notes         TEXT,
+  adjusted_at   TIMESTAMPTZ DEFAULT now(),
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS purchase_orders (
-  id           SERIAL PRIMARY KEY,
-  po_number    TEXT    NOT NULL UNIQUE,
-  supplier_id  INTEGER REFERENCES suppliers(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE purchase_orders (
+  id            BIGINT PRIMARY KEY,
+  po_number     TEXT,
+  supplier_id   BIGINT,
+  created_by    BIGINT,
+  total_amount  NUMERIC     DEFAULT 0,
+  status        TEXT        DEFAULT 'pending',
+  notes         TEXT,
+  expected_at   TIMESTAMPTZ,
+  received_at   TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT now(),
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS purchase_order_items (
-  id           SERIAL PRIMARY KEY,
-  po_id        INTEGER NOT NULL REFERENCES purchase_orders(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE purchase_order_items (
+  id            BIGINT PRIMARY KEY,
+  po_id         BIGINT,
+  product_id    BIGINT,
+  quantity      NUMERIC,
+  unit_cost     NUMERIC,
+  received_qty  NUMERIC     DEFAULT 0,
+  line_total    NUMERIC,
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS activity_log (
-  id          SERIAL PRIMARY KEY,
-  user_id     INTEGER REFERENCES users(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
+CREATE TABLE activity_log (
+  id            BIGINT PRIMARY KEY,
+  user_id       BIGINT,
+  action        TEXT,
+  entity_type   TEXT,
+  entity_id     BIGINT,
+  detail        TEXT,
+  logged_at     TIMESTAMPTZ DEFAULT now(),
+  mobile_synced BOOLEAN     DEFAULT false
 );
 
-CREATE TABLE IF NOT EXISTS purchase_price_history (
-  id          SERIAL PRIMARY KEY,
-  product_id  INTEGER NOT NULL REFERENCES products(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
-);
+-- ── Row Level Security + open policy + mobile-pull index ──
+-- The anon key reads/writes via a single permissive policy.
+-- DROP POLICY IF EXISTS first because Postgres has no
+-- "CREATE POLICY IF NOT EXISTS" (this was the syntax error).
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOR t IN SELECT unnest(ARRAY[
+    'categories','suppliers','products','customers','sales','sale_items',
+    'payments','stock_adjustments','purchase_orders','purchase_order_items','activity_log'
+  ])
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+    EXECUTE format('DROP POLICY IF EXISTS allow_all ON %I', t);
+    EXECUTE format('CREATE POLICY allow_all ON %I FOR ALL USING (true) WITH CHECK (true)', t);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_mobile_synced ON %I (mobile_synced) WHERE mobile_synced = false', t, t);
+  END LOOP;
+END $$;
 
-CREATE TABLE IF NOT EXISTS selling_price_history (
-  id              SERIAL PRIMARY KEY,
-  product_id      INTEGER NOT NULL REFERENCES products(id,
-  mobile_synced BOOLEAN NOT NULL DEFAULT false
-);
-
-ALTER TABLE products ADD COLUMN IF NOT EXISTS bulk_unit          TEXT;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_bulk     NUMERIC    DEFAULT 1;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS bulk_buying_price  NUMERIC    DEFAULT 0;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS bulk_selling_price NUMERIC    DEFAULT 0;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS has_bulk_pricing   INTEGER DEFAULT 0;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS image_data         TEXT;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS pending_sell_price  NUMERIC;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS pending_bulk_price  NUMERIC;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS price_switch_at_qty NUMERIC;
-ALTER TABLE products ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'unit';
-
-ALTER TABLE customers ADD COLUMN IF NOT EXISTS price_group_id INTEGER REFERENCES customer_price_groups(id) ON DELETE SET NULL;
-
-ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_rate_applied      NUMERIC    DEFAULT 7.5;
-ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_inclusive_applied INTEGER DEFAULT 0;
-ALTER TABLE sales ADD COLUMN IF NOT EXISTS items_json        TEXT;
-ALTER TABLE sales ADD COLUMN IF NOT EXISTS total_cost_amount NUMERIC NOT NULL DEFAULT 0;
-
-ALTER TABLE purchase_price_history ADD COLUMN IF NOT EXISTS invoice_ref TEXT;
-
-ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS sell_mode TEXT NOT NULL DEFAULT 'unit';
-
-
-
-
-
-
-
-
-
--- Enable RLS (owner can see everything via anon key + policy)
-ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON categories FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON suppliers FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE products ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON products FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON customers FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON sales FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE sale_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON sale_items FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON payments FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE stock_adjustments ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON stock_adjustments FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE purchase_orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON purchase_orders FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE purchase_order_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON purchase_order_items FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON activity_log FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE purchase_price_history ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON purchase_price_history FOR ALL USING (true) WITH CHECK (true);
-ALTER TABLE selling_price_history ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all" ON selling_price_history FOR ALL USING (true) WITH CHECK (true);
-
--- Index on mobile_synced for efficient mobile pulls
-CREATE INDEX IF NOT EXISTS idx_categories_mobile_synced ON categories(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_suppliers_mobile_synced ON suppliers(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_products_mobile_synced ON products(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_customers_mobile_synced ON customers(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_sales_mobile_synced ON sales(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_sale_items_mobile_synced ON sale_items(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_payments_mobile_synced ON payments(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_stock_adjustments_mobile_synced ON stock_adjustments(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_purchase_orders_mobile_synced ON purchase_orders(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_purchase_order_items_mobile_synced ON purchase_order_items(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_activity_log_mobile_synced ON activity_log(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_purchase_price_history_mobile_synced ON purchase_price_history(mobile_synced) WHERE mobile_synced = false;
-CREATE INDEX IF NOT EXISTS idx_selling_price_history_mobile_synced ON selling_price_history(mobile_synced) WHERE mobile_synced = false;
+-- Refresh PostgREST's schema cache so the new columns are visible immediately.
+NOTIFY pgrst, 'reload schema';
