@@ -1,0 +1,18 @@
+# Drag the `mobile-viewer` folder onto https://app.netlify.com/drop, or import
+# the repo and set the publish directory to `mobile-viewer`. This file is read
+# from the publish root.
+
+[build]
+  publish = "."
+
+# The service worker must never be served from a stale cache, otherwise app
+# updates won't reach already-installed phones.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Content-Type = "application/manifest+json"
