@@ -1,16 +1,21 @@
 // ═══════════════════════════════════════════════════════════
-// NovaPOS Mobile Store Monitor v2 — PWA
-// Read-only dashboard for store owners. Pulls from Supabase,
-// caches in IndexedDB, works offline, push notifications.
+// NovaPOS Mobile Store Monitor v3 — PWA
+// Read-only dashboard for store owners. Queries Supabase LIVE every
+// time a screen is opened or refreshed — no manual "Sync" step, no
+// row caps, always current. IndexedDB is kept only as an offline
+// fallback (last-known-good snapshot shown with a clear "Offline"
+// banner if a live query fails — never the primary source while
+// online).
 // ═══════════════════════════════════════════════════════════
 
 const APP = document.getElementById('app')
 const DB_NAME = 'novapos_mobile'
 const DB_VER = 2
 const TABLES = ['products','sales','sale_items','payments','customers','categories','stock_adjustments']
-const REFRESH_MS = 5 * 60 * 1000  // auto-refresh every 5 min
+const REFRESH_MS = 5 * 60 * 1000  // auto-refresh the active tab every 5 min
+const PAGE_SIZE = 1000            // PostgREST's own per-request cap — paginate past it so a mature store's full history is never silently truncated
 
-// ─── IndexedDB ──────────────────────────────────────────
+// ─── IndexedDB (offline fallback cache only) ────────────
 let idb = null
 function openIDB() {
   return new Promise((resolve, reject) => {
@@ -24,8 +29,17 @@ function openIDB() {
     req.onerror = () => reject(req.error)
   })
 }
-function idbPut(store, data) {
-  return new Promise((r, j) => { const tx = idb.transaction(store, 'readwrite'); const os = tx.objectStore(store); for (const row of data) os.put(row); tx.oncomplete = r; tx.onerror = () => j(tx.error) })
+// Mirrors live truth exactly — clears the store first so a row deleted
+// server-side doesn't linger forever in the offline fallback.
+function idbReplaceAll(store, rows) {
+  return new Promise((res, rej) => {
+    const tx = idb.transaction(store, 'readwrite')
+    const os = tx.objectStore(store)
+    os.clear()
+    for (const row of rows) os.put(row)
+    tx.oncomplete = res
+    tx.onerror = () => rej(tx.error)
+  })
 }
 function idbGetAll(store) {
   return new Promise((r, j) => { const tx = idb.transaction(store, 'readonly'); const req = tx.objectStore(store).getAll(); req.onsuccess = () => r(req.result); req.onerror = () => j(req.error) })
@@ -50,31 +64,41 @@ const normalizeSupabaseUrl = raw => {
 }
 const initSB = c => { sb = supabase.createClient(normalizeSupabaseUrl(c.url), c.key) }
 
-async function pullData(cb) {
-  let total = 0
-  let pending = 0
-  for (const t of TABLES) {
-    cb?.(`Syncing ${t}...`)
-    try {
-      const { data, error } = await sb.from(t).select('*').eq('mobile_synced', false).limit(500)
-      if (error || !data?.length) continue
-      await idbPut(t, data)
-      total += data.length
-      const ids = data.map(r => r.id)
-      await sb.from(t).update({ mobile_synced: true }).in('id', ids)
-      // Each pull is capped at 500 rows — if a table had more unsynced rows
-      // than that, this cycle only got a slice of them. Check what's left
-      // so the UI can be honest about incomplete data instead of silently
-      // presenting a partial month/year as if it were the whole thing.
-      if (data.length === 500) {
-        const { count } = await sb.from(t).select('id', { count: 'exact', head: true }).eq('mobile_synced', false)
-        pending += count || 0
-      }
-    } catch (e) { console.warn(`Pull ${t}:`, e) }
+// Tracks whether the CURRENT tab render had to fall back to cache, so the
+// header status line can show an honest "Offline" banner. Reset at the top
+// of every renderTab() pass; only ever set to true within that pass (a
+// later successful parallel fetch should never erase an earlier failure).
+let fetchTracker = { offline: false, time: null }
+
+// Queries `table` live from Supabase, paginating past PostgREST's own
+// per-request row cap so a mature store's full history is never silently
+// truncated — this is the property the old IndexedDB-sync model could NOT
+// guarantee (it was capped at 500 rows per sync cycle). On success, mirrors
+// the result into IndexedDB as a best-effort offline cache. On failure
+// (no connection, etc.), falls back to whatever's cached and flags it.
+async function liveFetch(table, applyFilters) {
+  try {
+    let all = []
+    let offset = 0
+    for (;;) {
+      let q = sb.from(table).select('*')
+      if (applyFilters) q = applyFilters(q)
+      q = q.order('id', { ascending: true }).range(offset, offset + PAGE_SIZE - 1)
+      const { data, error } = await q
+      if (error) throw error
+      all = all.concat(data || [])
+      if (!data || data.length < PAGE_SIZE) break
+      offset += PAGE_SIZE
+    }
+    idbReplaceAll(table, all).catch(() => {}) // best-effort cache write, never blocks the UI
+    idbMeta('last_fetch_' + table, new Date().toISOString())
+    return all
+  } catch (e) {
+    console.warn(`Live fetch failed for ${table}, falling back to cache:`, e)
+    fetchTracker.offline = true
+    fetchTracker.time = await idbMeta('last_fetch_' + table)
+    return await idbGetAll(table)
   }
-  await idbMeta('last_sync', new Date().toISOString())
-  await idbMeta('pending_rows', pending)
-  return total
 }
 
 // ─── resolveLineMultiplier (JS port of saleService.ts's helper) ────────
@@ -90,7 +114,7 @@ function resolveLineMultiplier(item) {
   }
   const mode = item.sell_mode ?? 'unit'
   if (mode === 'pallet') return { level: 2, multiplier: item.units_per_pallet ?? 1 }
-  if (mode === 'bulk')   return { level: 1, multiplier: item.units_per_bulk ?? 1 }
+  if (mode === 'bulk')   return { level: 1, multiplier: item.units_per_bulk   ?? 1 }
   return { level: 0, multiplier: 1 }
 }
 
@@ -162,7 +186,10 @@ let menuOpen = false
 // numbers, stock, recent sales, alerts); these are the "dig deeper" screens.
 const MENU_ITEMS = [
   { id: 'stockaudit', label: 'Stock Audit',    sub: 'Purchased vs. sold vs. remaining, per product' },
+  { id: 'daily',      label: 'Daily Report',   sub: 'Pick any date — revenue, discounts, tax, payments' },
   { id: 'monthly',    label: 'Monthly Report', sub: 'Pick a month — revenue, profit, daily trend' },
+  { id: 'yearly',     label: 'Yearly Report',  sub: 'Pick a year — revenue, profit, monthly trend' },
+  { id: 'pl',         label: 'Profit & Loss',  sub: 'Any date range — revenue, COGS, gross profit' },
 ]
 
 function renderMenu() {
@@ -188,6 +215,14 @@ function renderMenu() {
   })
 }
 
+function updateStatusLine() {
+  const el = document.getElementById('syncst')
+  if (!el) return
+  el.textContent = fetchTracker.offline
+    ? `Offline — showing data from ${ago(fetchTracker.time)}`
+    : `Live — updated just now`
+}
+
 async function renderApp() {
   const c = getCfg()
   APP.innerHTML = `
@@ -203,10 +238,10 @@ async function renderApp() {
           </div>
         </div>
         <div class="flex gap-2">
-          <button id="bsync" class="bg-blue-600 rounded-lg px-3 py-1.5 text-xs flex items-center gap-1">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-            Sync</button>
-          <button id="bcfg" class="bg-blue-600 rounded-lg p-1.5">
+          <button id="brefresh" class="bg-blue-600 rounded-lg p-1.5" title="Refresh">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+          <button id="bcfg" class="bg-blue-600 rounded-lg p-1.5" title="Settings">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
@@ -231,39 +266,18 @@ async function renderApp() {
   // Hamburger menu (deeper reports — Stock Audit, Monthly Report)
   document.getElementById('bmenu').onclick = () => { menuOpen = true; renderMenu() }
 
-  // Sync button
-  async function reportSyncStatus(n) {
-    const el = document.getElementById('syncst')
-    const pending = await idbMeta('pending_rows')
-    const base = n > 0 ? `Synced ${n} rows` : 'Up to date'
-    el.textContent = pending > 0 ? `${base} — ${pending} more pending, tap Sync again` : base
-  }
-  document.getElementById('bsync').onclick = async () => {
-    const el = document.getElementById('syncst')
-    el.textContent = 'Syncing...'
-    try { const n = await pullData(m => el.textContent = m); await reportSyncStatus(n); renderTab() }
-    catch (e) { el.textContent = 'Sync failed' }
-  }
+  // Refresh — re-queries whatever tab is currently open, live
+  document.getElementById('brefresh').onclick = () => renderTab()
 
   // Settings
   document.getElementById('bcfg').onclick = () => { if (confirm('Disconnect from this store?')) { localStorage.removeItem('novapos_cfg'); renderSetup() } }
 
-  // Initial sync
-  try {
-    const n = await pullData(m => document.getElementById('syncst').textContent = m)
-    const ls = await idbMeta('last_sync')
-    if (n > 0) await reportSyncStatus(n)
-    else document.getElementById('syncst').textContent = `Last sync ${ago(ls)}`
-  } catch { document.getElementById('syncst').textContent = 'Offline — showing cached data' }
-
-  // Auto-refresh
-  if (refreshTimer) clearInterval(refreshTimer)
-  refreshTimer = setInterval(async () => {
-    try { await pullData(); renderTab() } catch {}
-  }, REFRESH_MS)
-
-  // Low-stock check via SW
+  // Low-stock check via SW — fires every login, independent of any tab
   if (swReg?.active) swReg.active.postMessage({ type: 'CHECK_STOCK', url: c.url, key: c.key })
+
+  // Auto-refresh — re-queries the active tab live every 5 min
+  if (refreshTimer) clearInterval(refreshTimer)
+  refreshTimer = setInterval(() => renderTab(), REFRESH_MS)
 
   renderTab()
 }
@@ -272,14 +286,19 @@ async function renderApp() {
 async function renderTab() {
   const el = document.getElementById('content')
   if (!el) return
+  fetchTracker = { offline: false, time: null }
   switch (tab) {
-    case 'overview':   return renderOverview(el)
-    case 'stock':      return renderStock(el)
-    case 'sales':      return renderSales(el)
-    case 'alerts':     return renderAlerts(el)
-    case 'stockaudit': return renderStockAudit(el)
-    case 'monthly':    return renderMonthlyReport(el)
+    case 'overview':   await renderOverview(el); break
+    case 'stock':      await renderStock(el); break
+    case 'sales':      await renderSales(el); break
+    case 'alerts':     await renderAlerts(el); break
+    case 'stockaudit': await renderStockAudit(el); break
+    case 'daily':      await renderDailyReport(el); break
+    case 'monthly':    await renderMonthlyReport(el); break
+    case 'yearly':     await renderYearlyReport(el); break
+    case 'pl':         await renderProfitLoss(el); break
   }
+  updateStatusLine()
 }
 
 // Returns { [product_id]: pieces } summed from every completed sale's
@@ -329,17 +348,19 @@ function pieceLabel(p, pieces) {
 function fmt1(n) { return (Math.round(n * 10) / 10).toLocaleString('en-NG') }
 
 async function renderStockAudit(el) {
-  const products    = await idbGetAll('products')
-  const sales        = await idbGetAll('sales')
-  const adjustments  = await idbGetAll('stock_adjustments')
+  const [products, sales, adjustments] = await Promise.all([
+    liveFetch('products'),
+    liveFetch('sales', q => q.eq('status', 'completed')),
+    liveFetch('stock_adjustments'),
+  ])
 
-  const sold      = sumSoldPieces(sales)       // all synced history — no window cap on mobile
+  const sold      = sumSoldPieces(sales)       // all-time, live — no row cap, no sync window
   const purchased = sumPurchasedPieces(adjustments)
 
   el.innerHTML = `
     <div class="mb-3">
       <h2 class="text-sm font-bold text-gray-800">Stock Audit</h2>
-      <p class="text-[11px] text-gray-400">Purchased = total ever received · Sold = from synced sales · Remaining = current stock</p>
+      <p class="text-[11px] text-gray-400">Purchased = total ever received · Sold = all-time · Remaining = current stock</p>
     </div>
     <div class="mb-3"><input id="saq" class="w-full bg-white border rounded-lg px-3 py-2 text-sm" placeholder="Search products..."></div>
     <div class="space-y-2">
@@ -371,14 +392,17 @@ async function renderStockAudit(el) {
 let reportMonth = new Date().toISOString().slice(0, 7) // 'YYYY-MM'
 
 async function renderMonthlyReport(el) {
-  const sales = await idbGetAll('sales')
-  const items = await idbGetAll('sale_items')
-  const done  = sales.filter(s => s.status === 'completed')
-
   const [y, m] = reportMonth.split('-').map(Number)
   const monthStart = `${reportMonth}-01`
   const daysInMonth = new Date(y, m, 0).getDate()
-  const monthSales = done.filter(s => dateKey(s.sale_date) >= monthStart && dateKey(s.sale_date) <= `${reportMonth}-${String(daysInMonth).padStart(2,'0')}`)
+  // Half-open interval [monthStart, nextMonthStart) — avoids the off-by-a-
+  // few-hours bug a string `<=` comparison against a bare date would have
+  // for sales recorded late on the last day of the month.
+  const nextMonthStart = new Date(y, m, 1).toISOString().slice(0, 10)
+
+  const monthSales = await liveFetch('sales', q => q.eq('status', 'completed').gte('sale_date', monthStart).lt('sale_date', nextMonthStart))
+  const monthSaleIds = monthSales.map(s => s.id)
+  const monthItems = monthSaleIds.length ? await liveFetch('sale_items', q => q.in('sale_id', monthSaleIds)) : []
 
   const revenue = monthSales.reduce((s, x) => s + (x.total_amount || 0), 0)
   const cogs    = monthSales.reduce((s, x) => s + (x.total_cost_amount || 0), 0)
@@ -390,7 +414,6 @@ async function renderMonthlyReport(el) {
   })
   const maxRev = Math.max(...dayTotals.map(d => d.rev), 1)
 
-  const monthItems = items.filter(i => monthSales.some(s => s.id === i.sale_id))
   const byProduct = {}
   monthItems.forEach(i => { byProduct[i.product_name] = (byProduct[i.product_name] || 0) + i.line_total })
   const topProds = Object.entries(byProduct).sort((a, b) => b[1] - a[1]).slice(0, 8)
@@ -442,15 +465,173 @@ async function renderMonthlyReport(el) {
   }
 }
 
+// Shared by Monthly/Yearly/P&L — same revenue-by-product ranking desktop's
+// topProductsDisplay() returns, sourced from each report's own sale_items.
+function topProductsFrom(items, limit = 8) {
+  const byProduct = {}
+  items.forEach(i => { byProduct[i.product_name] = (byProduct[i.product_name] || 0) + i.line_total })
+  return Object.entries(byProduct).sort((a, b) => b[1] - a[1]).slice(0, limit)
+}
+
+function topProductsHtml(topProds, emptyText) {
+  return `
+    <div class="bg-white rounded-xl p-3.5 shadow-sm">
+      <h3 class="text-xs font-semibold text-gray-700 mb-2">Top Products</h3>
+      ${topProds.length === 0 ? `<p class="text-[10px] text-gray-400">${emptyText}</p>` :
+        topProds.map(([n, v]) => `
+          <div class="flex justify-between py-1 border-b border-gray-50">
+            <span class="text-xs text-gray-600 truncate flex-1 mr-2">${n}</span>
+            <span class="text-xs font-medium text-green-600">${money(v)}</span>
+          </div>`).join('')}
+    </div>`
+}
+
+// ─── Daily Report — mirrors desktop's buildDailyReport ──
+let reportDate = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+
+async function renderDailyReport(el) {
+  const d = new Date(reportDate); d.setDate(d.getDate() + 1)
+  const nextDay = d.toISOString().slice(0, 10)
+
+  const [daySales, dayItems] = await Promise.all([
+    liveFetch('sales', q => q.gte('sale_date', reportDate).lt('sale_date', nextDay)),
+    liveFetch('sale_items'),
+  ])
+
+  const completed = daySales.filter(s => s.status === 'completed')
+  const voidCount  = daySales.filter(s => s.status === 'voided').length
+  const revenue    = completed.reduce((s, x) => s + (x.total_amount || 0), 0)
+  const discounts  = completed.reduce((s, x) => s + (x.discount_amt || 0), 0)
+  const tax        = completed.reduce((s, x) => s + (x.tax_amount || 0), 0)
+  const cogs       = completed.reduce((s, x) => s + (x.total_cost_amount || 0), 0)
+
+  const dayItemsForSales = dayItems.filter(i => completed.some(s => s.id === i.sale_id))
+  const topProds = topProductsFrom(dayItemsForSales)
+
+  const isToday = reportDate === new Date().toISOString().slice(0, 10)
+  const label = isToday ? `Today (${reportDate})` : reportDate
+
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-3 gap-2">
+      <h2 class="text-sm font-bold text-gray-800 flex-1">${label}</h2>
+      <input id="dpick" type="date" value="${reportDate}" max="${new Date().toISOString().slice(0,10)}"
+        class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+    </div>
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="bg-white rounded-xl p-3.5 shadow-sm"><p class="text-[10px] text-gray-400 uppercase">Revenue</p><p class="text-xl font-bold text-green-600">${money(revenue)}</p><p class="text-[10px] text-gray-400">${completed.length} sales</p></div>
+      <div class="bg-white rounded-xl p-3.5 shadow-sm"><p class="text-[10px] text-gray-400 uppercase">Gross Profit</p><p class="text-xl font-bold ${revenue-cogs>=0?'text-blue-600':'text-red-600'}">${money(revenue-cogs)}</p><p class="text-[10px] text-gray-400">COGS ${money(cogs)}</p></div>
+      <div class="bg-white rounded-xl p-3.5 shadow-sm"><p class="text-[10px] text-gray-400 uppercase">Discounts</p><p class="text-lg font-bold text-amber-600">${money(discounts)}</p></div>
+      <div class="bg-white rounded-xl p-3.5 shadow-sm"><p class="text-[10px] text-gray-400 uppercase">Tax Collected</p><p class="text-lg font-bold text-slate-700">${money(tax)}</p></div>
+    </div>
+    ${voidCount > 0 ? `<div class="bg-red-50 rounded-xl p-3 mb-4 text-xs text-red-700">${voidCount} sale${voidCount>1?'s':''} voided this day</div>` : ''}
+    ${topProductsHtml(topProds, 'No sales this day')}`
+
+  document.getElementById('dpick').onchange = e => { reportDate = e.target.value; renderDailyReport(el) }
+}
+
+// ─── Yearly Report — mirrors desktop's buildYearlyReport ──
+let reportYear = new Date().getFullYear()
+
+async function renderYearlyReport(el) {
+  const yearStart = `${reportYear}-01-01`
+  const nextYearStart = `${reportYear + 1}-01-01`
+
+  const yearSales = await liveFetch('sales', q => q.eq('status', 'completed').gte('sale_date', yearStart).lt('sale_date', nextYearStart))
+  const yearSaleIds = yearSales.map(s => s.id)
+  const yearItems = yearSaleIds.length ? await liveFetch('sale_items', q => q.in('sale_id', yearSaleIds)) : []
+
+  const revenue = yearSales.reduce((s, x) => s + (x.total_amount || 0), 0)
+  const cogs    = yearSales.reduce((s, x) => s + (x.total_cost_amount || 0), 0)
+  const profit  = revenue - cogs
+
+  const monthTotals = Array.from({ length: 12 }, (_, i) => {
+    const mm = String(i + 1).padStart(2, '0')
+    const rev = yearSales.filter(s => dateKey(s.sale_date).slice(5, 7) === mm).reduce((s, x) => s + (x.total_amount || 0), 0)
+    return { month: i + 1, rev }
+  })
+  const maxRev = Math.max(...monthTotals.map(m => m.rev), 1)
+  const monthNames = ['J','F','M','A','M','J','J','A','S','O','N','D']
+
+  const topProds = topProductsFrom(yearItems)
+
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <button id="prevy" class="p-2 bg-white rounded-lg shadow-sm">‹</button>
+      <h2 class="text-sm font-bold text-gray-800">${reportYear}</h2>
+      <button id="nexty" class="p-2 bg-white rounded-lg shadow-sm">›</button>
+    </div>
+    <div class="grid grid-cols-3 gap-2 mb-4">
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Revenue</p><p class="text-sm font-bold text-green-600">${money(revenue)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">COGS</p><p class="text-sm font-bold text-gray-600">${money(cogs)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Profit</p><p class="text-sm font-bold ${profit>=0?'text-blue-600':'text-red-600'}">${money(profit)}</p></div>
+    </div>
+    <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
+      <h3 class="text-xs font-semibold text-gray-700 mb-3">Monthly Revenue</h3>
+      <div class="flex items-end gap-1 h-20">
+        ${monthTotals.map(m => `<div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full rounded-t bg-blue-300" style="height:${Math.max(2, (m.rev/maxRev)*100)}%" title="${monthNames[m.month-1]}: ${money(m.rev)}"></div>
+          <span class="text-[8px] text-gray-400">${monthNames[m.month-1]}</span>
+        </div>`).join('')}
+      </div>
+      <p class="text-[9px] text-gray-400 mt-1">${yearSales.length} sales this year</p>
+    </div>
+    ${topProductsHtml(topProds, 'No sales this year')}`
+
+  document.getElementById('prevy').onclick = () => { reportYear -= 1; renderYearlyReport(el) }
+  document.getElementById('nexty').onclick = () => { reportYear += 1; renderYearlyReport(el) }
+}
+
+// ─── Profit & Loss — mirrors desktop's buildProfitLoss ──
+let plFrom = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10)
+let plTo   = new Date().toISOString().slice(0, 10)
+
+async function renderProfitLoss(el) {
+  const d = new Date(plTo); d.setDate(d.getDate() + 1)
+  const toExclusive = d.toISOString().slice(0, 10)
+
+  const sales = await liveFetch('sales', q => q.eq('status', 'completed').gte('sale_date', plFrom).lt('sale_date', toExclusive))
+  const saleIds = sales.map(s => s.id)
+  const items = saleIds.length ? await liveFetch('sale_items', q => q.in('sale_id', saleIds)) : []
+
+  const revenue   = sales.reduce((s, x) => s + (x.total_amount || 0), 0)
+  const discounts = sales.reduce((s, x) => s + (x.discount_amt || 0), 0)
+  const tax       = sales.reduce((s, x) => s + (x.tax_amount || 0), 0)
+  const cogs      = sales.reduce((s, x) => s + (x.total_cost_amount || 0), 0)
+  const grossProfit = revenue - cogs
+  const topProds = topProductsFrom(items, 10)
+
+  el.innerHTML = `
+    <div class="mb-3">
+      <h2 class="text-sm font-bold text-gray-800">Profit & Loss</h2>
+      <div class="flex items-center gap-2 mt-2">
+        <input id="plfrom" type="date" value="${plFrom}" class="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+        <span class="text-xs text-gray-400">to</span>
+        <input id="plto" type="date" value="${plTo}" max="${new Date().toISOString().slice(0,10)}" class="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+      </div>
+    </div>
+    <div class="bg-white rounded-xl p-4 shadow-sm mb-4 space-y-2">
+      <div class="flex justify-between text-sm"><span class="text-gray-500">Revenue</span><span class="font-semibold text-gray-800">${money(revenue)}</span></div>
+      <div class="flex justify-between text-sm"><span class="text-gray-500">Discounts given</span><span class="text-amber-600">-${money(discounts)}</span></div>
+      <div class="flex justify-between text-sm"><span class="text-gray-500">Tax collected</span><span class="text-gray-600">${money(tax)}</span></div>
+      <div class="flex justify-between text-sm border-t border-gray-100 pt-2"><span class="text-gray-500">Cost of Goods Sold</span><span class="text-red-500">-${money(cogs)}</span></div>
+      <div class="flex justify-between text-base font-bold border-t border-gray-200 pt-2"><span>Gross Profit</span><span class="${grossProfit>=0?'text-blue-600':'text-red-600'}">${money(grossProfit)}</span></div>
+      <p class="text-[10px] text-gray-400 pt-1">${sales.length} sales in range</p>
+    </div>
+    ${topProductsHtml(topProds, 'No sales in this range')}`
+
+  document.getElementById('plfrom').onchange = e => { plFrom = e.target.value; renderProfitLoss(el) }
+  document.getElementById('plto').onchange   = e => { plTo = e.target.value; renderProfitLoss(el) }
+}
+
 async function renderOverview(el) {
-  const products = await idbGetAll('products')
-  const sales    = await idbGetAll('sales')
-  const payments = await idbGetAll('payments')
-  const items    = await idbGetAll('sale_items')
+  const sevenDaysAgo = last7Days()[0]
+  const [products, recentSales] = await Promise.all([
+    liveFetch('products'),
+    liveFetch('sales', q => q.eq('status', 'completed').gte('sale_date', sevenDaysAgo)),
+  ])
 
   const today   = new Date().toISOString().slice(0, 10)
-  const done    = sales.filter(s => s.status === 'completed')
-  const tSales  = done.filter(s => dateKey(s.sale_date) === today)
+  const tSales  = recentSales.filter(s => dateKey(s.sale_date) === today)
   const tRev    = tSales.reduce((s, r) => s + (r.total_amount || 0), 0)
   const tCost   = tSales.reduce((s, r) => s + (r.total_cost_amount || 0), 0)
   const tProfit = tRev - tCost
@@ -459,21 +640,28 @@ async function renderOverview(el) {
   const lowCount = products.filter(p => p.stock_qty > 0 && p.stock_qty <= p.reorder_level).length
   const outCount = products.filter(p => p.stock_qty <= 0).length
 
-  // Revenue chart (last 7 days)
+  // Revenue chart (last 7 days) — recentSales is already scoped to this
+  // exact window, so no extra fetch needed.
   const days = last7Days()
   const dayRevs = days.map(d => {
-    const r = done.filter(s => dateKey(s.sale_date) === d).reduce((s, x) => s + (x.total_amount || 0), 0)
+    const r = recentSales.filter(s => dateKey(s.sale_date) === d).reduce((s, x) => s + (x.total_amount || 0), 0)
     return { day: d, rev: r }
   })
   const maxRev = Math.max(...dayRevs.map(d => d.rev), 1)
 
-  // Payment method breakdown (today)
-  const tPayments = payments.filter(p => tSales.some(s => s.id === p.sale_id))
+  // Payment method breakdown + top products (today) — only fetched if
+  // there were any sales today, to avoid an empty .in() call.
+  const todaySaleIds = tSales.map(s => s.id)
+  const [tPayments, tItems] = todaySaleIds.length
+    ? await Promise.all([
+        liveFetch('payments', q => q.in('sale_id', todaySaleIds)),
+        liveFetch('sale_items', q => q.in('sale_id', todaySaleIds)),
+      ])
+    : [[], []]
+
   const byMethod = {}
   tPayments.forEach(p => { const m = p.method || 'cash'; byMethod[m] = (byMethod[m] || 0) + p.amount })
 
-  // Top 5 products by revenue (today)
-  const tItems = items.filter(i => tSales.some(s => s.id === i.sale_id))
   const byProduct = {}
   tItems.forEach(i => { byProduct[i.product_name] = (byProduct[i.product_name] || 0) + i.line_total })
   const topProds = Object.entries(byProduct).sort((a, b) => b[1] - a[1]).slice(0, 5)
@@ -543,7 +731,7 @@ async function renderOverview(el) {
 }
 
 async function renderStock(el) {
-  const products = await idbGetAll('products')
+  const products = await liveFetch('products')
   const sorted = [...products].sort((a, b) => a.stock_qty - b.stock_qty)
 
   el.innerHTML = `
@@ -582,21 +770,22 @@ async function renderStock(el) {
 }
 
 async function renderSales(el) {
-  const sales = await idbGetAll('sales')
-  const done = sales.filter(s => s.status === 'completed').sort((a, b) => (b.sale_date||'').localeCompare(a.sale_date||''))
+  const d = new Date(); d.setDate(d.getDate() - 13)
+  const fourteenDaysAgo = d.toISOString().slice(0, 10)
+  const done = await liveFetch('sales', q => q.eq('status', 'completed').gte('sale_date', fourteenDaysAgo).order('sale_date', { ascending: false }))
 
   // Group by date
   const groups = {}
-  done.forEach(s => { const d = dateKey(s.sale_date); if (!groups[d]) groups[d] = []; groups[d].push(s) })
-  const dates = Object.keys(groups).sort().reverse().slice(0, 14)
+  done.forEach(s => { const dk = dateKey(s.sale_date); if (!groups[dk]) groups[dk] = []; groups[dk].push(s) })
+  const dates = Object.keys(groups).sort().reverse()
 
   el.innerHTML = dates.length === 0
-    ? '<div class="text-center py-12 text-gray-400"><p class="text-sm">No sales synced yet</p><p class="text-xs mt-1">Tap Sync to pull data</p></div>'
-    : dates.map(d => {
-        const daySales = groups[d]
+    ? '<div class="text-center py-12 text-gray-400"><p class="text-sm">No sales in the last 14 days</p><p class="text-xs mt-1">Pull down or tap Refresh</p></div>'
+    : dates.map(dk => {
+        const daySales = groups[dk]
         const dayTotal = daySales.reduce((s, x) => s + (x.total_amount || 0), 0)
         const today = new Date().toISOString().slice(0, 10)
-        const label = d === today ? 'Today' : d
+        const label = dk === today ? 'Today' : dk
         return `
           <div class="mb-4">
             <div class="flex justify-between items-center mb-2">
@@ -618,7 +807,7 @@ async function renderSales(el) {
 }
 
 async function renderAlerts(el) {
-  const products = await idbGetAll('products')
+  const products = await liveFetch('products')
   const out = products.filter(p => p.stock_qty <= 0).sort((a, b) => a.name.localeCompare(b.name))
   const low = products.filter(p => p.stock_qty > 0 && p.stock_qty <= p.reorder_level).sort((a, b) => a.stock_qty - b.stock_qty)
 
