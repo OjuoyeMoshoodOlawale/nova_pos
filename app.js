@@ -185,6 +185,7 @@ let menuOpen = false
 // the 4 bottom tabs stay focused on the things checked constantly (today's
 // numbers, stock, recent sales, alerts); these are the "dig deeper" screens.
 const MENU_ITEMS = [
+  { id: 'inventory',  label: 'Inventory',      sub: 'Stock value, category mix, movers, dead stock' },
   { id: 'stockaudit', label: 'Stock Audit',    sub: 'Purchased vs. sold vs. remaining, per product' },
   { id: 'daily',      label: 'Daily Report',   sub: 'Pick any date — revenue, discounts, tax, payments' },
   { id: 'monthly',    label: 'Monthly Report', sub: 'Pick a month — revenue, profit, daily trend' },
@@ -292,6 +293,7 @@ async function renderTab() {
     case 'stock':      await renderStock(el); break
     case 'sales':      await renderSales(el); break
     case 'alerts':     await renderAlerts(el); break
+    case 'inventory':  await renderInventoryReport(el); break
     case 'stockaudit': await renderStockAudit(el); break
     case 'daily':      await renderDailyReport(el); break
     case 'monthly':    await renderMonthlyReport(el); break
@@ -346,6 +348,139 @@ function pieceLabel(p, pieces) {
   return hasBulk ? `${base} <span class="text-gray-400">(${fmt1(pieces / upb)} ${p.bulk_unit})</span>` : base
 }
 function fmt1(n) { return (Math.round(n * 10) / 10).toLocaleString('en-NG') }
+
+// ─── Inventory & Insights — mirrors desktop's buildInventoryReport +
+// buildInsights (reportService.ts): stock valuation, category mix, top/slow
+// movers, running-out projection, dead stock, top profit-makers — answers
+// "how much goods are in store" and "what's the state of the store" in one
+// screen rather than across several desktop-only tabs. "Units sold" is
+// read from each sale's immutable items_json snapshot (sumSoldPieces,
+// already used by Stock Audit above) so a later re-pack/price edit can
+// never silently change a historical sold figure — same guarantee as
+// desktop's buildInsights.
+const INSIGHTS_WINDOW_DAYS = 30
+
+async function renderInventoryReport(el) {
+  const since = new Date(); since.setDate(since.getDate() - INSIGHTS_WINDOW_DAYS)
+  const sinceISO = since.toISOString().slice(0, 10)
+
+  const [products, categories, sales] = await Promise.all([
+    liveFetch('products'),
+    liveFetch('categories'),
+    liveFetch('sales', q => q.eq('status', 'completed').gte('sale_date', sinceISO)),
+  ])
+
+  const catNameById = {}
+  categories.forEach(c => { catNameById[c.id] = c.name })
+
+  const soldPieces = sumSoldPieces(sales) // sales is already scoped to the window above
+
+  // Same formulas as desktop's buildInventoryReport — cost value is what's
+  // tied up in stock, retail value is what it'd be worth fully sold.
+  const totalStockValue  = products.reduce((s, p) => s + (p.cost_price || 0) * (p.stock_qty || 0), 0)
+  const totalRetailValue = products.reduce((s, p) => s + (p.selling_price || 0) * (p.stock_qty || 0), 0)
+  const outCount = products.filter(p => p.stock_qty <= 0).length
+  const lowCount = products.filter(p => p.stock_qty > 0 && p.stock_qty <= p.reorder_level).length
+
+  const catMap = {}
+  products.forEach(p => {
+    const cat = catNameById[p.category_id] || 'Uncategorised'
+    if (!catMap[cat]) catMap[cat] = { count: 0, value: 0 }
+    catMap[cat].count++
+    catMap[cat].value += (p.cost_price || 0) * (p.stock_qty || 0)
+  })
+  const categoryBreakdown = Object.entries(catMap).sort((a, b) => b[1].value - a[1].value)
+
+  // Per-product enrichment — same shape as desktop's buildInsights:
+  // velocity (pieces/day), days-left projection, profit in the window.
+  const enriched = products.map(p => {
+    const unitsSold = soldPieces[p.id] || 0
+    const perDay = unitsSold / INSIGHTS_WINDOW_DAYS
+    const daysLeft = perDay > 0 ? Math.round(p.stock_qty / perDay) : null
+    const profit = ((p.selling_price || 0) - (p.cost_price || 0)) * unitsSold
+    return { ...p, unitsSold, daysLeft, profit }
+  })
+  const sold = enriched.filter(p => p.unitsSold > 0)
+
+  const topMovers  = [...sold].sort((a, b) => b.unitsSold - a.unitsSold).slice(0, 6)
+  const slowMovers = [...sold].sort((a, b) => a.unitsSold - b.unitsSold).slice(0, 6)
+  const runningOut = enriched.filter(p => p.daysLeft != null && p.stock_qty > 0).sort((a, b) => a.daysLeft - b.daysLeft).slice(0, 6)
+  const deadStock   = enriched.filter(p => p.unitsSold === 0 && p.stock_qty > 0).sort((a, b) => b.stock_qty - a.stock_qty).slice(0, 6)
+  const topProfit   = [...sold].sort((a, b) => b.profit - a.profit).slice(0, 6)
+
+  function rowList(items, valueFn, emptyText) {
+    if (items.length === 0) return `<p class="text-[10px] text-gray-400">${emptyText}</p>`
+    return items.map(p => `
+      <div class="flex justify-between py-1 border-b border-gray-50">
+        <span class="text-xs text-gray-600 truncate flex-1 mr-2">${p.name}</span>
+        ${valueFn(p)}
+      </div>`).join('')
+  }
+
+  el.innerHTML = `
+    <div class="mb-3">
+      <h2 class="text-sm font-bold text-gray-800">Inventory</h2>
+      <p class="text-[11px] text-gray-400">What's in store right now, and how it's moving (last ${INSIGHTS_WINDOW_DAYS} days)</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mb-3">
+      <div class="bg-white rounded-xl p-3.5 shadow-sm">
+        <p class="text-[10px] text-gray-400 uppercase">Stock Cost Value</p>
+        <p class="text-lg font-bold text-slate-700">${money(totalStockValue)}</p>
+      </div>
+      <div class="bg-white rounded-xl p-3.5 shadow-sm">
+        <p class="text-[10px] text-gray-400 uppercase">Retail Value</p>
+        <p class="text-lg font-bold text-green-600">${money(totalRetailValue)}</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center">
+        <p class="text-[10px] text-gray-400 uppercase">Out of Stock</p>
+        <p class="text-lg font-bold text-red-600">${outCount}</p>
+      </div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center">
+        <p class="text-[10px] text-gray-400 uppercase">Low Stock</p>
+        <p class="text-lg font-bold text-amber-600">${lowCount}</p>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl p-3.5 shadow-sm mb-4">
+      <h3 class="text-xs font-semibold text-gray-700 mb-2">By Category <span class="text-gray-400 font-normal">(cost value)</span></h3>
+      ${categoryBreakdown.length === 0 ? '<p class="text-[10px] text-gray-400">No products yet</p>' :
+        categoryBreakdown.map(([cat, v]) => `
+          <div class="flex justify-between py-1 border-b border-gray-50">
+            <span class="text-xs text-gray-600">${cat} <span class="text-gray-400">(${v.count})</span></span>
+            <span class="text-xs font-medium text-gray-800">${money(v.value)}</span>
+          </div>`).join('')}
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div class="bg-white rounded-xl p-3.5 shadow-sm">
+        <h3 class="text-xs font-semibold text-gray-700 mb-2">Top Movers</h3>
+        ${rowList(topMovers, p => `<span class="text-xs font-medium text-blue-600">${fmt1(p.unitsSold)}</span>`, 'No sales yet')}
+      </div>
+      <div class="bg-white rounded-xl p-3.5 shadow-sm">
+        <h3 class="text-xs font-semibold text-gray-700 mb-2">Slow Movers</h3>
+        ${rowList(slowMovers, p => `<span class="text-xs font-medium text-gray-500">${fmt1(p.unitsSold)}</span>`, '—')}
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl p-3.5 shadow-sm mb-4">
+      <h3 class="text-xs font-semibold text-gray-700 mb-2">Running Out Soon</h3>
+      ${rowList(runningOut, p => `<span class="text-xs font-medium text-amber-600">~${p.daysLeft}d left</span>`, 'Nothing projected to run out')}
+    </div>
+
+    <div class="bg-white rounded-xl p-3.5 shadow-sm mb-4">
+      <h3 class="text-xs font-semibold text-gray-700 mb-2">Dead Stock <span class="text-gray-400 font-normal">(no sales in ${INSIGHTS_WINDOW_DAYS}d)</span></h3>
+      ${rowList(deadStock, p => `<span class="text-xs font-medium text-red-500">${money((p.cost_price||0)*(p.stock_qty||0))} tied up</span>`, 'None — everything is moving')}
+    </div>
+
+    <div class="bg-white rounded-xl p-3.5 shadow-sm">
+      <h3 class="text-xs font-semibold text-gray-700 mb-2">Top Profit Makers</h3>
+      ${rowList(topProfit, p => `<span class="text-xs font-medium text-green-600">${money(p.profit)}</span>`, 'No sales yet')}
+    </div>`
+}
 
 async function renderStockAudit(el) {
   const [products, sales, adjustments] = await Promise.all([
@@ -428,17 +563,17 @@ async function renderMonthlyReport(el) {
     </div>
 
     <div class="grid grid-cols-3 gap-2 mb-4">
-      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Revenue</p><p class="text-sm font-bold text-green-600">${money(revenue)}</p></div>
-      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">COGS</p><p class="text-sm font-bold text-gray-600">${money(cogs)}</p></div>
-      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Profit</p><p class="text-sm font-bold ${profit>=0?'text-blue-600':'text-red-600'}">${money(profit)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Revenue</p><p class="text-base font-bold text-green-600">${money(revenue)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">COGS</p><p class="text-base font-bold text-gray-600">${money(cogs)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Profit</p><p class="text-base font-bold ${profit>=0?'text-blue-600':'text-red-600'}">${money(profit)}</p></div>
     </div>
 
     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
       <h3 class="text-xs font-semibold text-gray-700 mb-3">Daily Revenue</h3>
       <div class="flex items-end gap-0.5 h-20">
-        ${dayTotals.map(d => `<div class="flex-1 rounded-t bg-blue-300" style="height:${Math.max(2, (d.rev/maxRev)*100)}%" title="Day ${d.day}: ${money(d.rev)}"></div>`).join('')}
+        ${dayTotals.map(d => `<div class="daybar flex-1 rounded-t bg-blue-300 active:bg-blue-500" data-day="${d.day}" data-rev="${d.rev}" style="height:${Math.max(2, (d.rev/maxRev)*100)}%"></div>`).join('')}
       </div>
-      <p class="text-[9px] text-gray-400 mt-1">${monthSales.length} sales this month</p>
+      <p id="daypick" class="text-[9px] text-gray-400 mt-1">${monthSales.length} sales this month — tap a bar for that day's total</p>
     </div>
 
     <div class="bg-white rounded-xl p-3.5 shadow-sm">
@@ -463,6 +598,11 @@ async function renderMonthlyReport(el) {
     reportMonth = d.toISOString().slice(0, 7)
     renderMonthlyReport(el)
   }
+  // Bars have no hover state on a touchscreen — a tap surfaces the same
+  // date/total a desktop user would get from a mouseover title attribute.
+  el.querySelectorAll('.daybar').forEach(bar => bar.onclick = () => {
+    document.getElementById('daypick').textContent = `Day ${bar.dataset.day}: ${money(Number(bar.dataset.rev))}`
+  })
 }
 
 // Shared by Monthly/Yearly/P&L — same revenue-by-product ranking desktop's
@@ -561,23 +701,26 @@ async function renderYearlyReport(el) {
       <button id="nexty" class="p-2 bg-white rounded-lg shadow-sm">›</button>
     </div>
     <div class="grid grid-cols-3 gap-2 mb-4">
-      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Revenue</p><p class="text-sm font-bold text-green-600">${money(revenue)}</p></div>
-      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">COGS</p><p class="text-sm font-bold text-gray-600">${money(cogs)}</p></div>
-      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Profit</p><p class="text-sm font-bold ${profit>=0?'text-blue-600':'text-red-600'}">${money(profit)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Revenue</p><p class="text-base font-bold text-green-600">${money(revenue)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">COGS</p><p class="text-base font-bold text-gray-600">${money(cogs)}</p></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm text-center"><p class="text-[9px] text-gray-400 uppercase">Profit</p><p class="text-base font-bold ${profit>=0?'text-blue-600':'text-red-600'}">${money(profit)}</p></div>
     </div>
     <div class="bg-white rounded-xl p-4 shadow-sm mb-4">
       <h3 class="text-xs font-semibold text-gray-700 mb-3">Monthly Revenue</h3>
       <div class="flex items-end gap-1 h-20">
         ${monthTotals.map(m => `<div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full rounded-t bg-blue-300" style="height:${Math.max(2, (m.rev/maxRev)*100)}%" title="${monthNames[m.month-1]}: ${money(m.rev)}"></div>
+          <div class="monthbar w-full rounded-t bg-blue-300 active:bg-blue-500" data-month="${monthNames[m.month-1]}" data-rev="${m.rev}" style="height:${Math.max(2, (m.rev/maxRev)*100)}%"></div>
           <span class="text-[8px] text-gray-400">${monthNames[m.month-1]}</span>
         </div>`).join('')}
       </div>
-      <p class="text-[9px] text-gray-400 mt-1">${yearSales.length} sales this year</p>
+      <p id="monthpick" class="text-[9px] text-gray-400 mt-1">${yearSales.length} sales this year — tap a bar for that month's total</p>
     </div>
     ${topProductsHtml(topProds, 'No sales this year')}`
 
   document.getElementById('prevy').onclick = () => { reportYear -= 1; renderYearlyReport(el) }
+  el.querySelectorAll('.monthbar').forEach(bar => bar.onclick = () => {
+    document.getElementById('monthpick').textContent = `${bar.dataset.month}: ${money(Number(bar.dataset.rev))}`
+  })
   document.getElementById('nexty').onclick = () => { reportYear += 1; renderYearlyReport(el) }
 }
 
